@@ -107,4 +107,58 @@ public class BenchMainTests {
         Assert.that((int64) BenchMain.run(args, list)).isEqualTo(2);
         return;
     }
+
+    // ---- 0.1.1: --out into a directory that does not exist ---------------
+
+    @Test
+    public void outIntoAMissingDirectoryCreatesIt() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String out #= TestFiles.scratch("made/on/demand/results.csv");
+        String[] args = heap String[5];
+        args[0] = "--run";
+        args[1] = "--bench";
+        args[2] = "counting";
+        args[3] = "--out";
+        args[4] = "" + out;
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(0);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(2);
+        String envPath #= TestFiles.scratch("made/on/demand/env.csv");
+        String env #= TestFiles.read(envPath);
+        Assert.that(env).startsWith("key,value\n");
+        return;
+    }
+
+    @Test
+    public void outUnderARegularFileIsAUsageErrorAndWritesNothing() {
+        String blocker #= TestFiles.scratch("blocker");
+        TestFiles.write(blocker, "not a directory\n");
+        String out #= TestFiles.scratch("blocker/results.csv");
+        String why #= BenchMain.prepareOut(out);
+        Assert.that(why).contains(out);
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String[] args = heap String[5];
+        args[0] = "--run";
+        args[1] = "--bench";
+        args[2] = "counting";
+        args[3] = "--out";
+        args[4] = "" + out;
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(2);
+        // Nothing measured: the check comes before the run.
+        CountingBench c = (CountingBench) list.get(0);
+        Assert.that((int64) c.runs).isEqualTo(0);
+        String still #= TestFiles.read(blocker);
+        Assert.that(still).isEqualTo("not a directory\n");
+        return;
+    }
+
+    @Test
+    public void anExistingOrBareOutNeedsNoPreparation() {
+        String here #= BenchMain.prepareOut("results.csv");
+        Assert.that(here).isEqualTo("");
+        String dir #= TestFiles.scratch("results.csv");
+        String there #= BenchMain.prepareOut(dir);
+        Assert.that(there).isEqualTo("");
+        return;
+    }
 }

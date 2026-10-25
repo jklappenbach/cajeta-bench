@@ -1,0 +1,250 @@
+package dev.cajeta.bench;
+
+import cajeta.io.file.Path;
+import cajeta.process.Command;
+import cajeta.process.ProcessResult;
+
+import dev.cajeta.bench.Benchmark;
+import dev.cajeta.bench.detect.Sys;
+
+// A benchmark whose measured work is an external command: a compiler run, a
+// binary's start-up, a load generator such as `oha` against a server
+// (plan units 15, 18, 19). Each trial runs the command once and the harness
+// times it with its own clock, exactly as it times an in-process run.
+//
+// Use it directly:
+//
+//   ExternalBenchmark e = heap ExternalBenchmark();
+//   e.describe("hello-start", "toolchain/startup");
+//   e.command(#argv);                    // String[], argv[0] resolved on PATH
+//   e.environment(#entries);             // optional, replaces the env ("K=V")
+//   e.workingDirectory("build");         // optional
+//   e.iterations(3, 20);                 // warmup, trials
+//
+// or subclass it and override argvFor(variant) for a per-variant command,
+// and checkResult() to inspect stdout() (call `this.lastExitCode == 0` first).
+//
+// The row:
+//   * a non-zero exit fails the row (status=failed, notes `<prog> exited N:
+//     <first stderr line>`); a program that cannot be started, or one past
+//     timeoutMillis, fails it too.
+//   * peak_rss_kb is the CHILD's peak resident set, from wait4(2) rusage
+//     (ru_maxrss) as GNU time reports it: one extra untimed execution under
+//     `/usr/bin/time -f %M`. The runtime's own child reaping (waitpid in
+//     cajeta_rt_process.c) does not expose rusage, and sampling
+//     /proc/<pid>/status misses short children and the final growth of long
+//     ones, so the rusage figure is the one recorded. Without /usr/bin/time
+//     (macOS's BSD time takes other flags; Windows has none) the column is
+//     -1, not measured.
+//   * alloc_bytes and working_set_kb are -1: they describe this process,
+//     which only waits. notes carry `external`.
+//   * The timed region includes building the Command and fork/exec, which is
+//     what a user of the command pays too.
+public class ExternalBenchmark extends Benchmark {
+    public String extName;
+    public String extArea;
+    public String[] cmd;
+    public String[] cmdEnv;
+    public String cmdCwd;
+    public int32 warm;
+    public int32 trials;
+    public int64 timeoutMs;
+
+    public int32 lastExitCode;
+    public String lastStdout;
+    public String lastStderr;
+    public String lastVariant;
+
+    public ExternalBenchmark() {
+        this.extName = "external";
+        this.extArea = "toolchain/external";
+        this.cmd = heap String[0];
+        this.cmdEnv = null;
+        this.cmdCwd = "";
+        this.warm = 3;
+        this.trials = 20;
+        this.timeoutMs = (int64) 0;
+        this.lastExitCode = -1;
+        this.lastStdout = "";
+        this.lastStderr = "";
+        this.lastVariant = "";
+    }
+
+    // ---- configuration ---------------------------------------------------
+
+    public void describe(String name, String area) {
+        this.extName = "" + name;
+        this.extArea = "" + area;
+    }
+
+    public void command(#String[] argv) {
+        this.cmd #= argv;
+    }
+
+    // Replace the child's environment with `entries` ("KEY=VALUE"). Unset
+    // (the default) inherits this process's environment.
+    public void environment(#String[] entries) {
+        this.cmdEnv #= entries;
+    }
+
+    public void workingDirectory(String dir) {
+        this.cmdCwd = "" + dir;
+    }
+
+    public void iterations(int32 warmup, int32 measured) {
+        this.warm = warmup;
+        this.trials = measured;
+    }
+
+    // Kill a trial past `ms` and fail the row. 0 (the default) = no limit.
+    public void timeoutMillis(int64 ms) {
+        this.timeoutMs = ms;
+    }
+
+    // The command for `variant`. Default: the configured argv for every variant.
+    public #String[] argvFor(String variant) {
+        return ExternalBenchmark.copyOf(this.cmd);
+    }
+
+    // ---- Benchmark contract ----------------------------------------------
+
+    public String name() { return this.extName; }
+    public String area() { return this.extArea; }
+    public int32 warmupIters() { return this.warm; }
+    public int32 measuredIters() { return this.trials; }
+    public boolean external() { return true; }
+
+    public void run(int32 iterations) {
+        this.runVariant("", iterations);
+    }
+
+    public void runVariant(String variant, int32 iterations) {
+        this.lastVariant = "" + variant;
+        int32 i = 0;
+        while (i < iterations) {
+            this.execute(variant);
+            i = i + 1;
+        }
+    }
+
+    // A zero exit. Subclasses add checks on stdout().
+    public boolean checkResult() {
+        return this.lastExitCode == 0;
+    }
+
+    // stdout of the last execution (a view; copy it to keep it).
+    public String stdout() {
+        return this.lastStdout;
+    }
+
+    public String stderr() {
+        return this.lastStderr;
+    }
+
+    // ---- execution -------------------------------------------------------
+
+    // Run the command once; throw (a failed row) unless it started and exited 0.
+    public void execute(String variant) {
+        String[] argv #= this.argvFor(variant);
+        if (argv.count() == 0) {
+            throw heap Exception("ExternalBenchmark " + this.extName + " has no command");
+        }
+        String prog = "" + argv[0];
+        ProcessResult r #= this.launch(#argv);
+        this.lastStdout #= Sys.copyText(r.stdout());
+        this.lastStderr #= Sys.copyText(r.stderr());
+        this.lastExitCode = r.exitCode();
+        if (!r.launched()) {
+            throw heap Exception("could not start " + prog);
+        }
+        if (r.timedOut()) {
+            throw heap Exception(prog + " timed out after " + this.timeoutMs + " ms");
+        }
+        if (r.exitCode() != 0) {
+            String first #= Sys.firstLine(this.lastStderr);
+            if (r.exitCode() == 127 && first.isEmpty()) {
+                throw heap Exception("could not start " + prog + " (exit 127)");
+            }
+            throw heap Exception(prog + " exited " + r.exitCode() + ": " + first);
+        }
+    }
+
+    // A Command for `argv` with this benchmark's environment, directory and
+    // timeout, stdout and stderr captured, run to completion.
+    public #ProcessResult launch(#String[] argv) {
+        Command c = heap Command(#argv);
+        if (this.cmdEnv != null) {
+            String[] env #= ExternalBenchmark.copyOf(this.cmdEnv);
+            c.environment(#env);
+        }
+        if (!this.cmdCwd.isEmpty()) {
+            String dir = "" + this.cmdCwd;
+            c.workingDir(#dir);
+        }
+        if (this.timeoutMs > 0) {
+            c.timeoutMillis(this.timeoutMs);
+        }
+        c.captureStdout();
+        c.captureStderr();
+        return c.run();
+    }
+
+    // The child's peak RSS in KiB from one untimed run under GNU time, or -1.
+    // Leaves lastStdout / lastExitCode as the measured trials left them.
+    public int64 measuredPeakRssKb() {
+        Path gt #= Path.of("/usr/bin/time");
+        if (!gt.exists()) {
+            return (int64) -1;
+        }
+        String[] inner #= this.argvFor(this.lastVariant);
+        int32 n = (int32) inner.count();
+        if (n == 0) {
+            return (int64) -1;
+        }
+        String[] argv = heap String[n + 3];
+        argv[0] = "/usr/bin/time";
+        argv[1] = "-f";
+        argv[2] = "CAJETA_BENCH_MAXRSS=%M";
+        int32 i = 0;
+        while (i < n) {
+            argv[i + 3] = "" + inner[i];
+            i = i + 1;
+        }
+        ProcessResult r #= this.launch(#argv);
+        if (!r.launched()) {
+            return (int64) -1;
+        }
+        String err #= Sys.copyText(r.stderr());
+        String v #= Sys.tokenAfter(err, "CAJETA_BENCH_MAXRSS=");
+        return ExternalBenchmark.parseKb(v);
+    }
+
+    public static int64 parseKb(String v) {
+        int32 n = (int32) v.count();
+        if (n == 0) {
+            return (int64) -1;
+        }
+        int64 val = (int64) 0;
+        int32 i = 0;
+        while (i < n) {
+            int8 c = v.byteAt(i);
+            if (c < 48 || c > 57) {
+                return (int64) -1;
+            }
+            val = val * 10 + (int64) (c - 48);
+            i = i + 1;
+        }
+        return val;
+    }
+
+    public static #String[] copyOf(String[] a) {
+        int32 n = (int32) a.count();
+        String[] out = heap String[n];
+        int32 i = 0;
+        while (i < n) {
+            out[i] = "" + a[i];
+            i = i + 1;
+        }
+        return out;
+    }
+}

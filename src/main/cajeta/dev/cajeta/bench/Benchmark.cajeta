@@ -193,4 +193,19 @@ public class Benchmark {
     public boolean checkCompetitor() {
         return true;
     }
+
+    // ---- external commands (0.1.1, ExternalBenchmark) -------------------
+
+    // True when the measured work runs in a child process. The harness then
+    // reports the child's peak RSS (measuredPeakRssKb) and no in-process
+    // allocation count, and tags the row's notes `external`.
+    public boolean external() {
+        return false;
+    }
+
+    // The child's peak resident set in KiB, measured outside the timed
+    // trials; -1 when it cannot be measured. Read only when external().
+    public int64 measuredPeakRssKb() {
+        return (int64) -1;
+    }
 }

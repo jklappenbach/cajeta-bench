@@ -32,5 +32,13 @@ expect 1 "$fx/v2-short-header.csv"
 expect 1 "$fx/v1-failed-status.csv"
 expect 1 --require-suite "$fx/v2-ok.csv"
 expect 2 --bogus "$fx/v2-ok.csv"
+# 0.1.1: matmul is the catalog id math/matmul, never the bare name.
+expect 0 "$fx/v2-xpu-matmul.csv"
+expect 1 "$fx/v2-math-matmul-slow.csv"
+expect 0 "$fx/v2-math-matmul-ok-beside-xpu.csv"
+# 0.1.1: an ExternalBenchmark row (notes tag `external`) has no in-process
+# allocation count; any other measured cajeta row still must.
+expect 0 "$fx/v2-external-no-alloc.csv"
+expect 1 "$fx/v2-alloc-missing.csv"
 
 [[ "$fails" -eq 0 ]] && echo "verify-fidelity: all cases pass" || { echo "verify-fidelity: $fails case(s) failed"; exit 1; }

@@ -73,15 +73,19 @@ public final class Sys {
             return "";
         }
         // stdout() is a borrow of the result's interior: copy it out.
-        int8[] out = r.stdout();
-        if (out == null) {
+        return Sys.copyText(r.stdout());
+    }
+
+    /** An owned String copy of `bytes` (a ProcessResult's stdout/stderr borrow); "" for null. */
+    public static #String copyText(int8[] bytes) {
+        if (bytes == null) {
             return "";
         }
-        int32 n = (int32) out.count();
+        int32 n = (int32) bytes.count();
         int8[] cp = heap int8[n];
         int32 i = 0;
         while (i < n) {
-            cp[i] = out[i];
+            cp[i] = bytes[i];
             i = i + 1;
         }
         return heap String(#cp, n);

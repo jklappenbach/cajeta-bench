@@ -12,7 +12,7 @@ library the way `dev.cajeta.unit` is the test library
 // your bench project's cajeta.json
 "settings": {
     "capabilities": ["filesystem", "clock", "env", "process"],
-    "dependencies": { "dev.cajeta.bench": "0.1.0" },
+    "dependencies": { "dev.cajeta.bench": "0.1.1" },
     "build": { "entry-method": "my.bench.Main::main" }
 },
 "tasks": {
@@ -60,10 +60,11 @@ public class HashMapIntBench extends Benchmark {
 | `--run` | measure and write `results.csv` and `env.csv` beside it |
 | `--area <path>` | select a catalog path, or a prefix of one (`collection` selects `collection/*`) |
 | `--bench <name>` | select one benchmark by `name()` |
-| `--out <path>` | results CSV (default `results.csv`); `<dir>/results.csv` puts env at `<dir>/env.csv` |
+| `--out <path>` | results CSV (default `results.csv`); `<dir>/results.csv` puts env at `<dir>/env.csv`. A missing directory is created; one that cannot be (a file in the way) is exit 2 before anything is measured, naming the path |
 
 Exit status is 0 when every row is `ok` or `skipped`, 1 when any row `failed` or
-was `invalid` (or the selection matched nothing), 2 on a usage error. A failing
+was `invalid` (or the selection matched nothing), 2 on a usage error or an
+unwritable `--out`. "wrote" is printed only after the write happened. A failing
 benchmark never stops the run.
 
 | Environment | |
@@ -107,6 +108,32 @@ competitor (`runCompetitor`), so both see the same clocks and thermal state.
 Each side's median goes on its own row; the competitor row takes
 `competitorLanguage()`, `competitorPlatform()` and `competitorVersion()`, and
 both rows carry `interleaved` in `notes`.
+
+## External commands
+
+`ExternalBenchmark` times a child process per trial with the harness clock:
+compiles, start-up, a load generator such as `oha` against a server.
+
+```cajeta
+ExternalBenchmark e = heap ExternalBenchmark();
+e.describe("hello-start", "toolchain/startup");
+e.command(#argv);                 // String[]; argv[0] resolved on PATH
+e.environment(#entries);          // optional "KEY=VALUE" list, replaces the env
+e.workingDirectory("build");      // optional
+e.iterations(3, 20);              // warmup, trials
+e.timeoutMillis(60000);           // optional
+```
+
+Subclass it to vary the command per variant (`argvFor(variant)`) or to check
+output (`checkResult()` reading `stdout()`; test `lastExitCode == 0` first).
+A non-zero exit, a program that cannot start, or a timeout is a `failed` row
+with the reason in `notes`. `peak_rss_kb` is the child's peak resident set from
+`wait4` rusage, as GNU time reports it, taken in one extra untimed run under
+`/usr/bin/time -f %M` (the runtime's own reaping uses `waitpid` and exposes no
+rusage; `/proc` sampling misses short children). Without `/usr/bin/time` it is
+-1. `alloc_bytes` and `working_set_kb` are -1, since they describe the waiting
+harness, and `notes` carry `external`, which the fidelity gate's allocation
+check honors.
 
 ## Schema v2
 

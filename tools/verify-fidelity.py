@@ -14,9 +14,10 @@
 #  2. FIDELITY (benchmark-fidelity Unit 11.a.1). The outcomes of the fidelity
 #     plan, each checked when its benchmark is in the file:
 #       * Memory tab populated  — no measured Cajeta row has alloc_bytes == -1
+#                                  (rows tagged `external` excepted)
 #       * string-build fairness — every language reports input_size == 4000
 #       * JSON float parsing     — Cajeta json-dom/serialize/roundtrip rows are ok
-#       * matmul kernel-pool     — Cajeta matmul median in the kernel-pool band
+#       * matmul kernel-pool     — Cajeta math/matmul median in the kernel-pool band
 #       * SIMD compute kernels    — dot/saxpy/spectral improved vs the scalar baselines
 #     A benchmark absent from the file is reported SKIP, so a consumer repo's
 #     one-benchmark CSV passes. `--require-suite` restores the profile gate's
@@ -132,7 +133,13 @@ def main(argv):
             skip(name, "not in this file")
 
     # 1. Memory tab — no measured Cajeta row emits the -1 alloc_bytes sentinel.
-    bad_alloc = [r for r in measured if (num(r["alloc_bytes"]) is None or num(r["alloc_bytes"]) < 0)]
+    #    Except an ExternalBenchmark row (notes tag `external`, dev.cajeta.bench
+    #    0.1.1): its work runs in a child process, its memory is the child's
+    #    peak_rss_kb, and the harness has no allocator count to give.
+    def is_external(r):
+        return "external" in [p.strip() for p in (r.get("notes") or "").split(";")]
+    bad_alloc = [r for r in measured if not is_external(r)
+                 and (num(r["alloc_bytes"]) is None or num(r["alloc_bytes"]) < 0)]
     check("memory: no measured Cajeta alloc_bytes == -1", not bad_alloc,
           "" if not bad_alloc else f"{len(bad_alloc)} offenders, e.g. "
           + ", ".join(sorted({r["benchmark"] for r in bad_alloc})[:5]))
@@ -159,13 +166,21 @@ def main(argv):
         gated(f"json: {bench} Cajeta rows ok (no float-parse skip)", [bench], json_check)
 
     # 4. matmul — Cajeta median in the kernel-pool band (~0.05–0.08 ms; allow slack).
+    #    Matched by catalog id math/matmul (area/benchmark), never by the name
+    #    `matmul` alone: the device GEMMs (xpu/gemm-f32, and v1's gpu/matmul)
+    #    are other benchmarks and must not be read against the CPU band.
+    def is_cpu_matmul(r):
+        return r["benchmark"] == "matmul" and r["area"] == "math"
     def matmul():
-        mm = [r for r in measured if r["benchmark"] == "matmul"]
+        mm = [r for r in measured if is_cpu_matmul(r)]
         mm_med = num(mm[0]["median_ns"]) if mm else None
         check("matmul: Cajeta median in kernel-pool band (40k–130k ns)",
               mm_med is not None and 40000 <= mm_med <= 130000,
               f"median_ns={mm_med}")
-    gated("matmul: Cajeta median in kernel-pool band (40k–130k ns)", ["matmul"], matmul)
+    if require_suite or any(is_cpu_matmul(r) for r in rows):
+        matmul()
+    else:
+        skip("matmul: Cajeta median in kernel-pool band (40k–130k ns)", "not in this file")
 
     # 5. SIMD compute kernels — improved vs the recorded scalar baselines.
     #    (dot ~390us, saxpy ~590us, spectral ~1632us before vectorization.)

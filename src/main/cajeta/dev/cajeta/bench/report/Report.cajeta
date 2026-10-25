@@ -17,8 +17,8 @@ import dev.cajeta.bench.report.Result;
 // the shell driver (env-capture.sh).
 public class Report {
 
-    public static void writeResults(String path, ArrayList<Result> rows) {
-        Csv.write(path, rows);
+    public static boolean writeResults(String path, ArrayList<Result> rows) {
+        return Csv.write(path, rows);
     }
 
     // env.csv sits beside results.csv: `<dir>/results.csv` → `<dir>/env.csv`;
@@ -34,7 +34,8 @@ public class Report {
         return resultsPath + ".env.csv";
     }
 
-    public static void writeEnv(String path, BenchConfig cfg) {
+    // false when the file could not be opened.
+    public static boolean writeEnv(String path, BenchConfig cfg) {
         String machine #= Machine.resolve();
         String kernel #= Sys.readText("/proc/sys/kernel/osrelease");
         String kt #= kernel.trim();
@@ -49,6 +50,9 @@ public class Report {
         }
 
         FileWriter w #= File.openWrite(path, OpenMode.WRITE);
+        if (w.fd < 0) {
+            return false;
+        }
         w.writeString("key,value\n");
         w.writeString("schema_version," + Result.SCHEMA_VERSION() + "\n");
         w.writeString("run_id," + Csv.field(cfg.runId) + "\n");
@@ -62,6 +66,7 @@ public class Report {
         w.writeString("smoke," + Csv.boolStr(cfg.smoke) + "\n");
         w.flush();
         w.close();
+        return true;
     }
 
     // `model name : AMD Ryzen 9 3950X 16-Core Processor` → the value.

@@ -73,12 +73,18 @@ public class Csv {
         return sb.toString();
     }
 
-    // Write render(rows) to `path`, replacing any file there.
-    public static void write(String path, ArrayList<Result> rows) {
+    // Write render(rows) to `path`, replacing any file there. false when the
+    // file could not be opened (a missing directory, no permission): the
+    // writer's fd is then -1 and writes would vanish without an error.
+    public static boolean write(String path, ArrayList<Result> rows) {
         String text #= Csv.render(rows);
         FileWriter w #= File.openWrite(path, OpenMode.WRITE);
+        if (w.fd < 0) {
+            return false;
+        }
         w.writeString(text);
         w.flush();
         w.close();
+        return true;
     }
 }

@@ -2,6 +2,9 @@ package dev.cajeta.bench.test;
 
 import cajeta.io.file.File;
 import cajeta.io.file.FileReader;
+import cajeta.io.file.FileWriter;
+import cajeta.io.file.OpenMode;
+import cajeta.io.file.Path;
 
 /** Small helpers the suites share: a scratch path and a whole-file read. */
 public final class TestFiles {
@@ -52,5 +55,17 @@ public final class TestFiles {
             i = i + 1;
         }
         return fields;
+    }
+
+    public static void write(String path, String text) {
+        FileWriter w #= File.openWrite(path, OpenMode.WRITE);
+        w.writeString(text);
+        w.flush();
+        w.close();
+    }
+
+    public static boolean exists(String path) {
+        Path p #= Path.of(path);
+        return p.exists();
     }
 }

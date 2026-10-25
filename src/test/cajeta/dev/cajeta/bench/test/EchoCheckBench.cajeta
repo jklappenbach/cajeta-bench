@@ -1,0 +1,25 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.ExternalBenchmark;
+
+/** Runs `/bin/echo hello` and passes only when stdout holds `expect`. */
+public class EchoCheckBench extends ExternalBenchmark {
+    public String expect;
+
+    public EchoCheckBench(String expect) {
+        this.expect = "" + expect;
+        String[] argv = heap String[2];
+        argv[0] = "/bin/echo";
+        argv[1] = "hello";
+        this.command(#argv);
+        this.describe("echo", "toolchain/probe");
+        this.iterations(1, 3);
+    }
+
+    public boolean checkResult() {
+        if (this.lastExitCode != 0) {
+            return false;
+        }
+        return this.stdout().contains(this.expect);
+    }
+}

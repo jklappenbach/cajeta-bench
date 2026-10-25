@@ -1,0 +1,183 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.ExternalBenchmark;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/**
+ * 0.1.1: ExternalBenchmark times an external command per trial with the
+ * harness clock, fails the row on a non-zero exit, hands stdout to
+ * checkResult, and reports the child's peak RSS.
+ */
+public class ExternalTests {
+
+    public ExternalTests() {
+        return;
+    }
+
+    static #String[] argv1(String a) {
+        String[] v = heap String[1];
+        v[0] = "" + a;
+        return v;
+    }
+
+    static #String[] argv2(String a, String b) {
+        String[] v = heap String[2];
+        v[0] = "" + a;
+        v[1] = "" + b;
+        return v;
+    }
+
+    static #String[] argv3(String a, String b, String c) {
+        String[] v = heap String[3];
+        v[0] = "" + a;
+        v[1] = "" + b;
+        v[2] = "" + c;
+        return v;
+    }
+
+    static #ExternalBenchmark named(String name, #String[] argv) {
+        ExternalBenchmark e = heap ExternalBenchmark();
+        e.describe(name, "toolchain/probe");
+        e.command(#argv);
+        e.iterations(1, 3);
+        return e;
+    }
+
+    static #Result measureAlone(ExternalBenchmark e, BenchConfig cfg) {
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(e, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(1);
+        Result r = rows.get(0);
+        Result copy = heap Result();
+        copy.status = "" + r.status;
+        copy.notes = "" + r.notes;
+        copy.minNs = r.minNs;
+        copy.medianNs = r.medianNs;
+        copy.p95Ns = r.p95Ns;
+        copy.peakRssKb = r.peakRssKb;
+        copy.allocBytes = r.allocBytes;
+        copy.workingSetKb = r.workingSetKb;
+        copy.trials = r.trials;
+        copy.checkOk = r.checkOk;
+        return copy;
+    }
+
+    @Test
+    public void aZeroExitIsAnOkRowTimedByTheHarnessClock() {
+        int64[] script = heap int64[6];
+        script[0] = 0;   script[1] = 10;
+        script[2] = 100; script[3] = 130;
+        script[4] = 200; script[5] = 220;
+        FakeClock fc = heap FakeClock(#script);
+        BenchConfig cfg = heap BenchConfig();
+        cfg.useClock(#fc);
+        String[] argv #= ExternalTests.argv1("/bin/true");
+        ExternalBenchmark e #= ExternalTests.named("true", #argv);
+        Result r #= ExternalTests.measureAlone(e, cfg);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.that(r.minNs).isEqualTo(10);
+        Assert.that(r.medianNs).isEqualTo(20);
+        Assert.that(r.p95Ns).isEqualTo(30);
+        Assert.that((int64) r.trials).isEqualTo(3);
+        Assert.that((int64) e.lastExitCode).isEqualTo(0);
+        Assert.that(r.notes).contains("external");
+        // The child's memory is peak_rss_kb; the harness's own allocator
+        // count says nothing about it, so it is not reported.
+        Assert.that(r.allocBytes).isEqualTo(-1);
+        Assert.that(r.workingSetKb).isEqualTo(-1);
+        return;
+    }
+
+    @Test
+    public void aNonZeroExitIsAFailedRowWithTheStatus() {
+        BenchConfig cfg = heap BenchConfig();
+        String[] argv #= ExternalTests.argv1("/bin/false");
+        ExternalBenchmark e #= ExternalTests.named("false", #argv);
+        Result r #= ExternalTests.measureAlone(e, cfg);
+        Assert.that(r.status).isEqualTo("failed");
+        Assert.isFalse(r.checkOk);
+        Assert.that(r.notes).contains("exited 1");
+        Assert.that(r.notes).contains("/bin/false");
+        Assert.that((int64) e.lastExitCode).isEqualTo(1);
+        return;
+    }
+
+    @Test
+    public void aProgramThatCannotStartIsAFailedRow() {
+        BenchConfig cfg = heap BenchConfig();
+        String[] argv #= ExternalTests.argv1("/nonexistent/bench-tool");
+        ExternalBenchmark e #= ExternalTests.named("missing", #argv);
+        Result r #= ExternalTests.measureAlone(e, cfg);
+        Assert.that(r.status).isEqualTo("failed");
+        Assert.that(r.notes).contains("could not start /nonexistent/bench-tool");
+        return;
+    }
+
+    @Test
+    public void stdoutReachesCheckResult() {
+        BenchConfig cfg = heap BenchConfig();
+        EchoCheckBench good = heap EchoCheckBench("hello");
+        Result r #= ExternalTests.measureAlone(good, cfg);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.that(good.stdout()).isEqualTo("hello\n");
+        EchoCheckBench bad = heap EchoCheckBench("goodbye");
+        Result r2 #= ExternalTests.measureAlone(bad, cfg);
+        Assert.that(r2.status).isEqualTo("invalid");
+        return;
+    }
+
+    @Test
+    public void environmentAndWorkingDirectoryReachTheChild() {
+        String[] argv #= ExternalTests.argv3("/bin/sh", "-c", "echo $BENCH_FOO; pwd");
+        ExternalBenchmark e #= ExternalTests.named("env-cwd", #argv);
+        String[] env = heap String[2];
+        env[0] = "BENCH_FOO=bar";
+        env[1] = "PATH=/usr/bin:/bin";
+        e.environment(#env);
+        e.workingDirectory("/");
+        e.runVariant("", 1);
+        Assert.that((int64) e.lastExitCode).isEqualTo(0);
+        Assert.that(e.stdout()).isEqualTo("bar\n/\n");
+        return;
+    }
+
+    @Test
+    public void aSleepIsTimedWithTheRealClock() {
+        BenchConfig cfg = heap BenchConfig();
+        String[] argv #= ExternalTests.argv2("/bin/sleep", "0.2");
+        ExternalBenchmark e #= ExternalTests.named("sleep", #argv);
+        e.iterations(0, 1);
+        Result r #= ExternalTests.measureAlone(e, cfg);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.that(r.medianNs).isGreaterThanOrEqualTo(200000000);
+        Assert.that(r.medianNs).isLessThan(5000000000);
+        return;
+    }
+
+    @Test
+    public void peakRssIsTheChildsFromRusage() {
+        if (!TestFiles.exists("/usr/bin/time") || !TestFiles.exists("/usr/bin/python3")) {
+            // Without GNU time the column is "not measured", never a guess.
+            String[] argv0 #= ExternalTests.argv1("/bin/true");
+            ExternalBenchmark t #= ExternalTests.named("true", #argv0);
+            Assert.that(t.measuredPeakRssKb()).isEqualTo(-1);
+            return;
+        }
+        BenchConfig cfg = heap BenchConfig();
+        String[] argv #= ExternalTests.argv3("/usr/bin/python3", "-c", "x = bytearray(64 * 1024 * 1024)");
+        ExternalBenchmark e #= ExternalTests.named("alloc-64m", #argv);
+        e.iterations(0, 1);
+        Result r #= ExternalTests.measureAlone(e, cfg);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.that(r.peakRssKb).isGreaterThanOrEqualTo(65536);
+        // ...and it is the child's, not this test binary's.
+        String[] small #= ExternalTests.argv1("/bin/true");
+        ExternalBenchmark t #= ExternalTests.named("true", #small);
+        Assert.that(t.measuredPeakRssKb()).isLessThan(65536);
+        return;
+    }
+}

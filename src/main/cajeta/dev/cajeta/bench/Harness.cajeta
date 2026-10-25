@@ -149,18 +149,15 @@ public class Harness {
 
         int64 peak = Memory.peakRssKb();
         boolean ok = b.checkResult();
-        int64 allocBytes = Harness.allocOfOneRun(b, variant);
 
         Result r #= Harness.baseRow(b, cfg, variant);
         r.inputSize = b.inputSize();
         r.warmup = warm;
         r.trials = trials;
         Harness.fillStats(r, samples, trials);
-        r.peakRssKb = peak;
-        r.workingSetKb = Harness.workingSet(peak, baseRss);
-        r.allocBytes = allocBytes;
+        Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, ok);
-        r.notes #= Harness.notesFor(b, cfg, "");
+        r.notes #= Harness.notesFor(b, cfg, Harness.leadFor(b, ""));
         return r;
     }
 
@@ -212,18 +209,15 @@ public class Harness {
         int64 peak = Memory.peakRssKb();
         boolean okOurs = b.checkResult();
         boolean okComp = b.checkCompetitor();
-        int64 allocBytes = Harness.allocOfOneRun(b, variant);
 
         Result r #= Harness.baseRow(b, cfg, variant);
         r.inputSize = b.inputSize();
         r.warmup = warm;
         r.trials = trials;
         Harness.fillStats(r, ours, trials);
-        r.peakRssKb = peak;
-        r.workingSetKb = Harness.workingSet(peak, baseRss);
-        r.allocBytes = allocBytes;
+        Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, okOurs);
-        r.notes #= Harness.notesFor(b, cfg, "interleaved");
+        r.notes #= Harness.notesFor(b, cfg, Harness.leadFor(b, "interleaved"));
         rows.add(#r);
 
         String cl = b.competitorLanguage();
@@ -258,6 +252,33 @@ public class Harness {
             allocBytes = 0;
         }
         return allocBytes;
+    }
+
+    // The memory columns. In-process work: peak RSS of this process, the
+    // working-set delta, and the allocator count of one untimed run. External
+    // work: the child's peak (Benchmark.measuredPeakRssKb, one more untimed
+    // run), and -1 for the two columns this process cannot see into.
+    public static void fillMemory(Benchmark b, String variant, Result r, int64 peak, int64 baseRss) {
+        if (b.external()) {
+            r.peakRssKb = b.measuredPeakRssKb();
+            r.workingSetKb = (int64) -1;
+            r.allocBytes = (int64) -1;
+            return;
+        }
+        r.peakRssKb = peak;
+        r.workingSetKb = Harness.workingSet(peak, baseRss);
+        r.allocBytes = Harness.allocOfOneRun(b, variant);
+    }
+
+    // The notes lead for a measured row: `lead`, prefixed `external` for a child process.
+    public static #String leadFor(Benchmark b, String lead) {
+        if (!b.external()) {
+            return "" + lead;
+        }
+        if (lead.isEmpty()) {
+            return "external";
+        }
+        return "external; " + lead;
     }
 
     public static int64 workingSet(int64 peak, int64 baseRss) {
