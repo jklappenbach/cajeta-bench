@@ -45,4 +45,25 @@ expect 1 "$fx/v2-alloc-missing.csv"
 expect 0 "$fx/v2-quoted-fields.csv"
 expect 0 --no-smoke "$fx/v2-quoted-fields.csv"
 
+# tools/csv-column.py: the CSV-aware reader smoke scripts use instead of
+# `awk -F,` (0.1.3 quotes free-text fields, so a comma splits nothing).
+col() { python3 "$here/csv-column.py" "$@"; }
+want() {   # want <expected> <args...>
+    local exp="$1"; shift
+    local got
+    got="$(col "$@" 2>&1)" || true
+    if [[ "$got" == "$exp" ]]; then
+        echo "  ok    csv-column $*"
+    else
+        echo "  FAIL  csv-column $*: got <$got> wanted <$exp>"
+        fails=$((fails + 1))
+    fi
+}
+want 'cajeta-llm 0.9.0 — hip, gfx1151' "$fx/v2-quoted-fields.csv" platform
+want 'Débian, 12' "$fx/v2-quoted-fields.csv" os
+want '37' --count-columns "$fx/v2-quoted-fields.csv"
+want $'ok\tfailed' "$fx/v2-ok.csv" status --join-tab
+want 'triad' "$fx/v2-ok.csv" benchmark --where status=failed
+want 'csv-column: no column nope (have: schema_version, run_id, …)' "$fx/v2-ok.csv" nope
+
 [[ "$fails" -eq 0 ]] && echo "verify-fidelity: all cases pass" || { echo "verify-fidelity: $fails case(s) failed"; exit 1; }

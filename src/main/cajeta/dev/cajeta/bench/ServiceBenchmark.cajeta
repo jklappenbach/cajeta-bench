@@ -1,0 +1,556 @@
+package dev.cajeta.bench;
+
+import cajeta.collection.ArrayList;
+import cajeta.io.file.FileReader;
+import cajeta.io.file.Path;
+import cajeta.io.net.IpAddress;
+import cajeta.io.net.SocketAddress;
+import cajeta.io.net.TcpStream;
+import cajeta.lang.StringBuilder;
+import cajeta.process.Command;
+import cajeta.process.Process;
+import cajeta.process.ProcessResult;
+import cajeta.time.Clock;
+
+import dev.cajeta.bench.ExternalBenchmark;
+import dev.cajeta.bench.detect.Sys;
+import dev.cajeta.bench.report.Memory;
+
+// A benchmark of a long-running service: an HTTP server, a database, a model
+// server. Per variant it starts the service, waits until it is ready, runs
+// the measured phase once per warmup and trial, and stops the service.
+//
+//   ServiceBenchmark s = heap ServiceBenchmark();
+//   s.describe("register-user-json", "primavera/rest");
+//   s.service(#serverArgv);                 // started with Command.start()
+//   s.serviceDirectory("apps/web/primavera");
+//   s.serviceLog("build/logs/primavera.log");
+//   s.readyOnUrl(8080, "/health", 200);     // or readyOnPort(8080)
+//   s.command(#ohaArgv);                    // the measured phase, or override runPhase
+//   s.iterations(1, 5);
+//
+// The measured phase is ExternalBenchmark's command (argvFor(variant), its
+// stdout exposed as stdout() to checkResult) or, when no command is set,
+// whatever a subclass's runPhase(variant) does: in-process code that may
+// call reportedNanos / reportedThroughput.
+//
+// Readiness: a TCP connect to 127.0.0.1:port, or that plus GET <path>
+// answering <status>. The poll sleeps by waiting on the service process, so a
+// service that dies before it is ready fails the row at once, naming its exit
+// status and the tail of its log. Past readyTimeoutMillis the row fails and
+// the service is stopped.
+//
+// peak_rss_kb: the service's VmHWM from /proc/<pid>/status, summed over the
+// service and its descendants (/proc/<pid>/task/*/children), sampled every
+// samplingMillis while the phase command runs (its stdout drained between
+// samples), after every phase and before the stop. VmHWM is the kernel's own
+// high-water mark, so a sample taken any time before the stop sees every
+// earlier peak; the interval guards against a service that dies mid-phase.
+// measuredPeakRssKb returns that peak and starts nothing. Linux only: on
+// another OS the column is -1.
+//
+// Stop: SIGTERM to the recorded PID (`kill -TERM <pid>`, never a pattern),
+// then SIGKILL through the process handle when it has not exited within
+// stopTimeoutMillis. lastStopSignal says which ended it.
+//
+// relaunchEachTrial(true) starts and stops the service inside every warmup
+// and trial (cold start, idle footprint); with no phase command, and unless
+// the phase reported its own time, the trial's time is exec to ready, and
+// notes say `reported`.
+//
+// The service runs as `/bin/sh -c 'exec "$@" >>LOG 2>&1 </dev/null' sh argv…`
+// so its output goes to serviceLog (default /dev/null) rather than a pipe it
+// could fill; `exec` keeps the recorded PID the service's own. POSIX only.
+// Readiness uses cajeta.io.net, so a consumer declares the `network`
+// capability.
+public class ServiceBenchmark extends ExternalBenchmark {
+    public String[] svcArgv;
+    public String[] svcEnv;
+    public String svcCwd;
+    public String svcLog;
+    public int32 readyPort;
+    public String readyPath;
+    public int32 readyStatus;
+    public boolean readyHttp;
+    public int64 readyTimeoutMs;
+    public int64 stopTimeoutMs;
+    public int32 sampleMs;
+    public boolean relaunch;
+
+    public boolean trace;
+    public Process svc;
+    public int32 lastServicePid;
+    public int64 peakKb;
+    public int64 lastReadyNanos;
+    public int32 phaseRuns;
+    public String lastStopSignal;
+
+    public ServiceBenchmark() {
+        super();
+        this.svcArgv = heap String[0];
+        this.svcEnv = null;
+        this.svcCwd = "";
+        this.svcLog = "";
+        this.readyPort = 0;
+        this.readyPath = "";
+        this.readyStatus = 200;
+        this.readyHttp = false;
+        this.readyTimeoutMs = (int64) 60000;
+        this.stopTimeoutMs = (int64) 5000;
+        this.sampleMs = 50;
+        this.relaunch = false;
+        this.trace = System.env.get("CAJETA_BENCH_TRACE") != null;
+        this.svc = null;
+        this.lastServicePid = -1;
+        this.peakKb = (int64) -1;
+        this.lastReadyNanos = (int64) -1;
+        this.phaseRuns = 0;
+        this.lastStopSignal = "";
+    }
+
+    // ---- configuration ---------------------------------------------------
+
+    public void service(#String[] argv) {
+        this.svcArgv #= argv;
+    }
+
+    public void serviceEnvironment(#String[] entries) {
+        this.svcEnv #= entries;
+    }
+
+    public void serviceDirectory(String dir) {
+        this.svcCwd = "" + dir;
+    }
+
+    // Where the service's stdout and stderr go (appended). Default /dev/null.
+    public void serviceLog(String path) {
+        this.svcLog = "" + path;
+    }
+
+    public void readyOnPort(int32 port) {
+        this.readyPort = port;
+        this.readyHttp = false;
+    }
+
+    public void readyOnUrl(int32 port, String path, int32 status) {
+        this.readyPort = port;
+        this.readyPath = "" + path;
+        this.readyStatus = status;
+        this.readyHttp = true;
+    }
+
+    public void readyTimeoutMillis(int64 ms) {
+        this.readyTimeoutMs = ms;
+    }
+
+    public void stopTimeoutMillis(int64 ms) {
+        this.stopTimeoutMs = ms;
+    }
+
+    public void samplingMillis(int32 ms) {
+        if (ms < 1) {
+            ms = 1;
+        }
+        this.sampleMs = ms;
+    }
+
+    public void relaunchEachTrial(boolean on) {
+        this.relaunch = on;
+    }
+
+    // The service command for `variant`. Default: the configured one.
+    public #String[] serviceArgvFor(String variant) {
+        return ExternalBenchmark.copyOf(this.svcArgv);
+    }
+
+    // ---- Benchmark contract ----------------------------------------------
+
+    public void prepare(String variant) {
+        this.peakKb = (int64) -1;
+        this.lastExitCode = -1;
+        this.lastStdout = "";
+        if (!this.relaunch) {
+            this.startService(variant);
+        }
+    }
+
+    public void runVariant(String variant, int32 iterations) {
+        this.lastVariant = "" + variant;
+        int32 i = 0;
+        while (i < iterations) {
+            if (this.relaunch) {
+                this.startService(variant);
+            }
+            this.runPhase(variant);
+            this.phaseRuns = this.phaseRuns + 1;
+            this.sample();
+            if (this.relaunch) {
+                if (!this.reportedNsSet && this.cmd.count() == 0) {
+                    this.reportedNanos(this.lastReadyNanos);
+                }
+                this.stopService();
+            }
+            i = i + 1;
+        }
+    }
+
+    // The measured phase. Default: the phase command, when one is set.
+    public void runPhase(String variant) {
+        if (this.cmd.count() > 0) {
+            this.runPhaseCommand(variant);
+        }
+    }
+
+    public void finishVariant(String variant) {
+        this.stopService();
+    }
+
+    public void teardown() {
+        this.stopService();
+    }
+
+    // A phase command must exit 0; a service with no phase command has none.
+    public boolean checkResult() {
+        if (this.cmd.count() == 0) {
+            return true;
+        }
+        return this.lastExitCode == 0;
+    }
+
+    // The sampled peak. Starts nothing.
+    public int64 measuredPeakRssKb() {
+        return this.peakKb;
+    }
+
+    // ---- the service -----------------------------------------------------
+
+    public void startService(String variant) {
+        String[] inner #= this.serviceArgvFor(variant);
+        int32 n = (int32) inner.count();
+        if (n == 0) {
+            throw heap Exception("ServiceBenchmark " + this.extName + " has no service command");
+        }
+        String prog = "" + inner[0];
+        String log = "/dev/null";
+        if (!this.svcLog.isEmpty()) {
+            log = "" + this.svcLog;
+        }
+        String[] argv = heap String[n + 4];
+        argv[0] = "/bin/sh";
+        argv[1] = "-c";
+        argv[2] = "exec \"$@\" >>'" + log + "' 2>&1 </dev/null";
+        argv[3] = "sh";
+        int32 i = 0;
+        while (i < n) {
+            argv[i + 4] = "" + inner[i];
+            i = i + 1;
+        }
+        Command c = heap Command(#argv);
+        if (this.svcEnv != null) {
+            String[] env #= ExternalBenchmark.copyOf(this.svcEnv);
+            c.environment(#env);
+        }
+        if (!this.svcCwd.isEmpty()) {
+            String dir = "" + this.svcCwd;
+            c.workingDir(#dir);
+        }
+        int64 t0 = Clock.nanoTime();
+        Process p #= c.start();
+        if (!p.launched()) {
+            throw heap Exception("could not start service " + prog);
+        }
+        this.lastServicePid = p.pid();
+        this.svc #= p;
+        this.note("started pid " + this.lastServicePid);
+        int64 deadline = t0 + this.readyTimeoutMs * (int64) 1000000;
+        boolean ready = false;
+        while (!ready) {
+            if (this.isReady()) {
+                ready = true;
+            } else {
+                ProcessResult w #= this.svc.waitMillis((int64) 5);
+                if (!w.timedOut()) {
+                    int32 code = w.exitCode();
+                    this.svc.close();
+                    this.svc = null;
+                    String tail #= ServiceBenchmark.tailOf(log);
+                    throw heap Exception(prog + " exited " + code + " before it was ready" + tail);
+                }
+                this.sample();
+                if (Clock.nanoTime() > deadline) {
+                    this.stopService();
+                    String what #= this.readyWhat();
+                    throw heap Exception(prog + " not ready within " + this.readyTimeoutMs + " ms (" + what + ")");
+                }
+            }
+        }
+        this.lastReadyNanos = Clock.nanoTime() - t0;
+        this.sample();
+        this.note("ready after " + this.lastReadyNanos + " ns");
+    }
+
+    public #String readyWhat() {
+        if (this.readyHttp) {
+            return "GET 127.0.0.1:" + this.readyPort + this.readyPath + " answering " + this.readyStatus;
+        }
+        return "TCP 127.0.0.1:" + this.readyPort;
+    }
+
+    // Stop the service by its recorded PID: TERM, then KILL after the timeout.
+    public void stopService() {
+        if (this.svc == null) {
+            return;
+        }
+        this.sample();
+        int32 pid = this.lastServicePid;
+        String[] k = heap String[3];
+        k[0] = "kill";
+        k[1] = "-TERM";
+        k[2] = "" + pid;
+        this.note("TERM " + pid);
+        String ignored #= Sys.run(#k);
+        this.note("waiting " + this.stopTimeoutMs + " ms");
+        // A local, not the field: on cajeta 0.46.3 `this.svc.waitMillis(this.stopTimeoutMs)`
+        // (a field read as the argument of the intrinsic) never returns, while
+        // the same call with a local or a literal times out as it should.
+        int64 stopMs = this.stopTimeoutMs;
+        ProcessResult w #= this.svc.waitMillis(stopMs);
+        this.note("wait returned, timedOut=" + w.timedOut());
+        if (w.timedOut()) {
+            this.svc.kill();
+            ProcessResult w2 #= this.svc.waitFor();
+            this.lastStopSignal = "KILL";
+        } else {
+            this.lastStopSignal = "TERM";
+        }
+        this.svc.close();
+        this.svc = null;
+        this.note("stopped by " + this.lastStopSignal);
+    }
+
+    public boolean isReady() {
+        if (this.readyPort <= 0) {
+            return true;
+        }
+        if (this.readyHttp) {
+            int32 st = ServiceBenchmark.httpStatus(this.readyPort, this.readyPath);
+            return st == this.readyStatus;
+        }
+        return ServiceBenchmark.tcpOpen(this.readyPort);
+    }
+
+    // ---- the measured phase command ----------------------------------------
+
+    // Run the phase command, draining its stdout and sampling the service
+    // every samplingMillis until it exits; throw (a failed row) unless it
+    // exited 0.
+    public void runPhaseCommand(String variant) {
+        String[] argv #= this.argvFor(variant);
+        String prog = "" + argv[0];
+        Command c = heap Command(#argv);
+        if (this.cmdEnv != null) {
+            String[] env #= ExternalBenchmark.copyOf(this.cmdEnv);
+            c.environment(#env);
+        }
+        if (!this.cmdCwd.isEmpty()) {
+            String dir = "" + this.cmdCwd;
+            c.workingDir(#dir);
+        }
+        c.pipeStdout();
+        Process p #= c.start();
+        if (!p.launched()) {
+            throw heap Exception("could not start " + prog);
+        }
+        FileReader out #= p.stdout();
+        this.note("phase " + prog + " pid " + p.pid());
+        StringBuilder sb = heap StringBuilder();
+        int8[] buf = heap int8[65536];
+        int64 deadline = (int64) -1;
+        if (this.timeoutMs > 0) {
+            deadline = Clock.nanoTime() + this.timeoutMs * (int64) 1000000;
+        }
+        boolean eof = false;
+        int32 pollMs = this.sampleMs;
+        while (!eof) {
+            if (out.awaitReadable(pollMs)) {
+                int32 got = out.read(buf, 65536);
+                if (got <= 0) {
+                    eof = true;
+                } else {
+                    sb.appendBytes(buf, 0, got);
+                }
+            }
+            this.sample();
+            if (deadline > 0 && Clock.nanoTime() > deadline) {
+                p.kill();
+                ProcessResult dead #= p.waitFor();
+                out.close();
+                p.close();
+                throw heap Exception(prog + " timed out after " + this.timeoutMs + " ms");
+            }
+        }
+        this.note("phase eof");
+        ProcessResult r #= p.waitFor();
+        out.close();
+        int32 code = r.exitCode();
+        this.note("phase exited " + code);
+        p.close();
+        this.lastStdout #= sb.toString();
+        this.lastStderr = "";
+        this.lastExitCode = code;
+        if (code != 0) {
+            throw heap Exception(prog + " exited " + code);
+        }
+    }
+
+    // CAJETA_BENCH_TRACE=1 prints each service step to stdout.
+    public void note(String step) {
+        if (this.trace) {
+            System.stdout.println("bench-trace: " + this.extName + ": " + step);
+        }
+    }
+
+    // ---- sampling ----------------------------------------------------------
+
+    public void sample() {
+        if (this.svc == null || this.lastServicePid <= 0) {
+            return;
+        }
+        int64 kb = ServiceBenchmark.treeHwmKb(this.lastServicePid);
+        if (kb > this.peakKb) {
+            this.peakKb = kb;
+        }
+    }
+
+    // VmHWM of `pid` plus every descendant, in KiB; -1 when /proc has none.
+    public static int64 treeHwmKb(int32 pid) {
+        ArrayList<int32> todo = heap ArrayList<int32>();
+        todo.add(pid);
+        int64 total = (int64) 0;
+        boolean any = false;
+        int32 seen = 0;
+        while (todo.count() > 0 && seen < 256) {
+            int32 p = todo.removeAt(todo.count() - 1);
+            seen = seen + 1;
+            int64 kb = Memory.parseIntAfterFile("/proc/" + p + "/status", "VmHWM:");
+            if (kb >= 0) {
+                total = total + kb;
+                any = true;
+            }
+            Path taskDir #= Path.of("/proc/" + p + "/task");
+            if (taskDir.isDir()) {
+                ArrayList<Path> tasks #= taskDir.list();
+                int32 i = 0;
+                while (i < tasks.count()) {
+                    Path t = tasks.get(i);
+                    String tid #= t.name();
+                    String kids #= Sys.readText("/proc/" + p + "/task/" + tid + "/children");
+                    ServiceBenchmark.pushPids(kids, todo);
+                    i = i + 1;
+                }
+            }
+        }
+        if (!any) {
+            return (int64) -1;
+        }
+        return total;
+    }
+
+    public static void pushPids(String text, ArrayList<int32> into) {
+        int32 n = text.byteLength();
+        int32 val = 0;
+        boolean inNum = false;
+        int32 i = 0;
+        while (i < n) {
+            int8 c = text.byteAt(i);
+            if (c >= 48 && c <= 57) {
+                val = val * 10 + (int32) (c - 48);
+                inNum = true;
+            } else {
+                if (inNum) {
+                    into.add(val);
+                }
+                val = 0;
+                inNum = false;
+            }
+            i = i + 1;
+        }
+        if (inNum) {
+            into.add(val);
+        }
+    }
+
+    // ---- readiness probes ----------------------------------------------------
+
+    public static boolean tcpOpen(int32 port) {
+        boolean ok = false;
+        try {
+            IpAddress ip #= IpAddress.loopbackV4();
+            SocketAddress a #= SocketAddress.of(#ip, port);
+            TcpStream s #= TcpStream.connectAsync(#a);
+            s.close();
+            ok = true;
+        } catch (Throwable e) {
+            ok = false;
+        }
+        return ok;
+    }
+
+    // The status code of GET <path> on 127.0.0.1:port, or -1.
+    public static int32 httpStatus(int32 port, String path) {
+        String head = "";
+        try {
+            head #= ServiceBenchmark.exchange(port, path);
+        } catch (Throwable e) {
+            head = "";
+        }
+        return ServiceBenchmark.parseStatus(head);
+    }
+
+    public static #String exchange(int32 port, String path) {
+        IpAddress ip #= IpAddress.loopbackV4();
+        SocketAddress a #= SocketAddress.of(#ip, port);
+        TcpStream s #= TcpStream.connectAsync(#a);
+        String req #= "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+        int8[] rb #= req.toBytes();
+        s.writeAll(rb, (int64) 0, (int64) rb.count());
+        int8[] buf = heap int8[512];
+        int64 got = s.readAsync(buf, (int64) 0, (int64) 512);
+        s.close();
+        if (got <= 0) {
+            return "";
+        }
+        return heap String(#buf, (int32) got);
+    }
+
+    // `HTTP/1.1 200 OK` → 200; -1 for anything else.
+    public static int32 parseStatus(String head) {
+        if (!head.startsWith("HTTP/")) {
+            return -1;
+        }
+        String code #= Sys.tokenAfter(head, " ");
+        int64 v = ExternalBenchmark.parseKb(code);
+        if (v < 0) {
+            return -1;
+        }
+        return (int32) v;
+    }
+
+    // ": <last line of the log>" when the log has one, else "".
+    public static #String tailOf(String log) {
+        if (log.equals("/dev/null")) {
+            return "";
+        }
+        String text #= Sys.readText(log);
+        String t #= text.trim();
+        if (t.isEmpty()) {
+            return "";
+        }
+        int32 n = t.byteLength();
+        int32 i = n - 1;
+        while (i > 0 && t.byteAt(i - 1) != 10) {
+            i = i - 1;
+        }
+        return ": " + t.substring(i, n);
+    }
+}

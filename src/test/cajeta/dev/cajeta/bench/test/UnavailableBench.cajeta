@@ -1,0 +1,23 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** 0.1.4: an unavailable benchmark, with or without its own reason. */
+public class UnavailableBench extends Benchmark {
+    public boolean ownReason;
+
+    public UnavailableBench(boolean ownReason) {
+        this.ownReason = ownReason;
+    }
+
+    public String name() { return "unavailable"; }
+    public String area() { return "test/unavailable"; }
+    public boolean available() { return false; }
+
+    public String unavailableReason() {
+        if (this.ownReason) {
+            return "needs a ROCm device; none on this machine";
+        }
+        return super.unavailableReason();
+    }
+}

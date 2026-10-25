@@ -1,0 +1,20 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** 0.1.4: a benchmark whose every row is another language's. */
+public class PythonBench extends Benchmark {
+    public PythonBench() {
+        return;
+    }
+
+    public String name() { return "py"; }
+    public String area() { return "test/identity"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 3; }
+    public String language() { return "python"; }
+    public String languageVersion() { return "3.12.3"; }
+    public String platform() { return "fastapi 0.115"; }
+    public String library() { return "fastapi"; }
+    public String libraryVersion() { return "0.115.0"; }
+}

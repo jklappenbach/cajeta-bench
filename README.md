@@ -12,7 +12,7 @@ library the way `dev.cajeta.unit` is the test library
 // your bench project's cajeta.json
 "settings": {
     "capabilities": ["filesystem", "clock", "env", "process"],
-    "dependencies": { "dev.cajeta.bench": "0.1.3" },
+    "dependencies": { "dev.cajeta.bench": "0.1.4" },
     "build": { "entry-method": "my.bench.Main::main" }
 },
 "tasks": {
@@ -93,9 +93,26 @@ New in v2:
 | `competitorNote()` | `""` | appended to `notes` |
 | `platform()` | `"cajeta"` | `platform` (`cajeta-llm 0.9.0 hip`, `llama.cpp b6123 cuda`) |
 | `model()` | `""` | `model` (`Llama-3.1-8B Q4_K_M sha256:…`) |
+| `language()`, `languageVersion()` | `cajeta`, `""` | `language`, `language_version` ("" on a cajeta row = the compiler version) |
+| `unavailableReason()` | `unavailable (dataset not configured or not fetched)` | `notes` of the skipped row when `available()` is false |
 | `library()`, `libraryVersion()` | `""` | `library`, `library_version` (`dev.cajeta.ml`, `0.10.6`) |
 | `backendFor(variant)` | `backend()` | `backend` and `driver` of that variant's row; decides interleaving |
 | `skipReasonFor(variant)` | `skipReason()` | `notes` of that variant's skipped row |
+| `languageFor`, `languageVersionFor`, `platformFor`, `libraryFor`, `libraryVersionFor`, `flagsFor`, `noteFor` `(variant)` | the whole-benchmark hook | that variant's identity columns and notes |
+| `variantLabel(variant)` | the variant | the `variant` column (`primavera@64` written as `64 connections`) |
+| `finishVariant(variant)` | nothing | called after each measured variant, even one that threw |
+
+A benchmark can emit rows for several platforms (primavera, Spring Boot,
+FastAPI) by returning one variant per platform and answering the `*For`
+hooks. Variant keys must be unique within one benchmark, not across
+benchmarks; `--variant` selects by key.
+
+**Figures measured inside the work.** A trial may call
+`reportedNanos(ns)` (exec to first 200, a build without its clean): it
+replaces that trial's wall-clock time and `notes` say `reported`. It may call
+`reportedThroughput(value, unit)` (a load generator's req/s): the row's
+throughput is the median reported value with that unit, in preference to the
+`inputSize()` derivation. Both are cleared before every warmup and trial.
 
 `throughput` is filled when `inputSize()` is not -1: `inputSize / median
 seconds`, three decimals, labelled `unit()`. So give `inputSize()` in the
@@ -145,6 +162,32 @@ rusage; `/proc` sampling misses short children). Without `/usr/bin/time` it is
 harness, and `notes` carry `external`, which the fidelity gate's allocation
 check honors.
 
+## Services
+
+`ServiceBenchmark` (an `ExternalBenchmark`) measures a long-running service:
+per variant it starts the service (`service(#argv)`, `serviceDirectory`,
+`serviceEnvironment`, `serviceLog`), waits for it (`readyOnPort(port)` or
+`readyOnUrl(port, "/health", 200)`, `readyTimeoutMillis`), runs the measured
+phase once per warmup and trial, and stops it.
+
+- The phase is the `command(#argv)` (say oha), whose stdout `checkResult`
+  reads through `stdout()`, or, with no command, a subclass's
+  `runPhase(variant)`, which may call `reportedNanos` / `reportedThroughput`.
+- `peak_rss_kb` is the service's VmHWM from `/proc/<pid>/status`, summed over
+  it and its descendants, sampled every `samplingMillis` while the phase runs
+  and after each phase. No extra run is made for it. Linux only (-1 elsewhere).
+- The stop is SIGTERM to the recorded PID, then SIGKILL after
+  `stopTimeoutMillis`; never by pattern. `lastStopSignal` says which.
+- A service that dies before it is ready, or is not ready in time, fails the
+  row (the service is stopped); the log's last line is in `notes`.
+- `relaunchEachTrial(true)` starts and stops the service in every trial; with
+  no phase command the trial's time is exec to ready (`reported`).
+- `CAJETA_BENCH_TRACE=1` prints each step (start, ready, phase, stop).
+
+Readiness uses `cajeta.io.net`, so the library declares the `network`
+capability. POSIX only (the service runs under `/bin/sh -c 'exec …'` so its
+output goes to the log and its PID stays its own).
+
 ## Schema v2
 
 v1's 32 columns, unchanged and in order, then five: 37 columns,
@@ -163,6 +206,18 @@ quoted, with inner quotes doubled; numbers stay bare. The file is UTF-8, and
 and copied short, so a comma past an em dash went unquoted and shifted the
 columns. `env.csv` values follow the same rule.
 
+**Reading a column in a smoke script.** Because free text is quoted,
+`awk -F,` and `cut -d,` split fields such as `notes` and read the wrong
+column. Use `tools/csv-column.py`:
+
+```sh
+python3 tools/csv-column.py results.csv status --where benchmark=decode
+python3 tools/csv-column.py --count-columns results.csv        # 37
+```
+
+or the one-liner it documents:
+`python3 -c 'import csv,sys; [print(r[sys.argv[2]]) for r in csv.DictReader(open(sys.argv[1], newline="", encoding="utf-8"))]' results.csv status`.
+
 `tools/verify-fidelity.py <results.csv>` checks a file of either schema
 (header shape, per-row version and status, and on v2 a machine and platform on
 every row), then the benchmark-fidelity outcomes for whichever of their
@@ -173,6 +228,8 @@ benchmarks the file holds. `--require-suite` makes an absent one a failure,
 
 ```sh
 ./run-tests.sh                 # build the .cja, compile the suite against it, run
+CAJETA_UNIT_FILTER=ServiceTests ./run-tests.sh   # a subset
+BENCH_TEST_TIMEOUT=120 ./run-tests.sh            # stop the test binary after 120 s (default 600)
 ./scripts/ci-checks.sh         # the suite plus tools/test-verify-fidelity.sh
 cajeta install                 # into ~/.olla/dev.cajeta.bench/<version>/
 ```

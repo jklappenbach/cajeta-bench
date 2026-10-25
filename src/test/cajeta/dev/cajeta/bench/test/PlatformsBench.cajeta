@@ -1,0 +1,79 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.bench.Benchmark;
+
+/**
+ * 0.1.4: one benchmark, rows for several platforms. Variant keys are unique
+ * within the benchmark (`primavera@64`, `spring-boot@64`); the written label
+ * is the same `64 connections` for both, and each row carries its platform's
+ * identity. Logs every finishVariant call.
+ */
+public class PlatformsBench extends Benchmark {
+    public String finished;
+    public boolean failSpring;
+
+    public PlatformsBench(boolean failSpring) {
+        this.finished = "";
+        this.failSpring = failSpring;
+    }
+
+    public String name() { return "register-user-json"; }
+    public String area() { return "primavera/rest"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 3; }
+    public String competitorNote() { return "oha 1.4.5"; }
+
+    public #ArrayList<String> variants() {
+        ArrayList<String> v = heap ArrayList<String>();
+        v.add("primavera@64");
+        v.add("spring-boot@64");
+        return v;
+    }
+
+    public void runVariant(String variant, int32 iterations) {
+        if (this.failSpring && variant.startsWith("spring")) {
+            throw heap Exception("spring-boot did not come up");
+        }
+    }
+
+    public void finishVariant(String variant) {
+        this.finished = this.finished + variant + ";";
+    }
+
+    public String variantLabel(String variant) { return "64 connections"; }
+
+    public String languageFor(String variant) {
+        if (variant.startsWith("spring")) { return "java"; }
+        return "cajeta";
+    }
+
+    public String languageVersionFor(String variant) {
+        if (variant.startsWith("spring")) { return "25"; }
+        return "";
+    }
+
+    public String platformFor(String variant) {
+        if (variant.startsWith("spring")) { return "Spring Boot 3.5.0"; }
+        return "primavera 0.4.0";
+    }
+
+    public String libraryFor(String variant) {
+        if (variant.startsWith("spring")) { return "spring-boot"; }
+        return "dev.cajeta.primavera";
+    }
+
+    public String libraryVersionFor(String variant) {
+        if (variant.startsWith("spring")) { return "3.5.0"; }
+        return "0.4.0";
+    }
+
+    public String flagsFor(String variant) {
+        if (variant.startsWith("spring")) { return "as shipped"; }
+        return "";
+    }
+
+    public String noteFor(String variant) {
+        return "oha 1.4.5; " + variant;
+    }
+}

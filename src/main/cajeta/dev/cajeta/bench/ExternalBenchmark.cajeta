@@ -182,7 +182,8 @@ public class ExternalBenchmark extends Benchmark {
             c.workingDir(#dir);
         }
         if (this.timeoutMs > 0) {
-            c.timeoutMillis(this.timeoutMs);
+            int64 limit = this.timeoutMs;     // a local: see ServiceBenchmark.stopService
+            c.timeoutMillis(limit);
         }
         c.captureStdout();
         c.captureStderr();

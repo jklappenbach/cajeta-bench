@@ -1,0 +1,18 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.ServiceBenchmark;
+
+/** A service whose measured phase is in-process code that reports its own time. */
+public class TcpPhaseService extends ServiceBenchmark {
+    public int32 phases;
+
+    public TcpPhaseService() {
+        super();
+        this.phases = 0;
+    }
+
+    public void runPhase(String variant) {
+        this.phases = this.phases + 1;
+        this.reportedNanos((int64) 4242);
+    }
+}

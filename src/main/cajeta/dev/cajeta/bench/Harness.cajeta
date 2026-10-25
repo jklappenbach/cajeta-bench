@@ -49,8 +49,8 @@ public class Harness {
             }
         }
         if (!b.available()) {
-            rows.add(Harness.skippedRow(b, cfg, "",
-                "unavailable (dataset not configured or not fetched)"));
+            String why = b.unavailableReason();
+            rows.add(Harness.skippedRow(b, cfg, "", why));
             return;
         }
         boolean setupOk = true;
@@ -82,6 +82,12 @@ public class Harness {
                 } catch (Throwable e) {
                     String msg #= Harness.messageOf(e);
                     rows.add(Harness.failedRow(b, cfg, v, msg));
+                }
+                try {
+                    b.finishVariant(v);
+                } catch (Throwable e) {
+                    String fmsg #= Harness.messageOf(e);
+                    System.stdout.println("bench: " + b.name() + " finishVariant(" + v + ") threw: " + fmsg);
                 }
             } else {
                 String why = b.skipReasonFor(v);
@@ -130,6 +136,43 @@ public class Harness {
         r.throughput #= Harness.fixed3(perSec);
     }
 
+    // The row's throughput from what the trials reported, when any did:
+    // their median, labelled with the reported unit.
+    public static void fillReportedThroughput(Result r, float64[] tps, int32 n, String unit) {
+        if (n <= 0) {
+            return;
+        }
+        Harness.sortF64(tps, n);
+        r.throughput #= Harness.fixed3(tps[n / 2]);
+        r.throughputUnit = "" + unit;
+    }
+
+    // `reported` when every trial reported its own time, `reported (k of n
+    // trials)` when some did, "" when none did.
+    public static #String reportedTag(int32 reported, int32 trials) {
+        if (reported <= 0) {
+            return "";
+        }
+        if (reported >= trials) {
+            return "reported";
+        }
+        return "reported (" + reported + " of " + trials + " trials)";
+    }
+
+    public static void sortF64(float64[] a, int32 n) {
+        int32 i = 1;
+        while (i < n) {
+            float64 key = a[i];
+            int32 j = i - 1;
+            while (j >= 0 && a[j] > key) {
+                a[j + 1] = a[j];
+                j = j - 1;
+            }
+            a[j + 1] = key;
+            i = i + 1;
+        }
+    }
+
     // `v` with exactly three decimals, rounded half up ("" for a negative or
     // out-of-range value).
     public static #String fixed3(float64 v) {
@@ -176,6 +219,7 @@ public class Harness {
         // Warmup — reach steady state before measuring.
         int32 w = 0;
         while (w < warm) {
+            b.clearReported();
             b.runVariant(variant, 1);
             w = w + 1;
         }
@@ -185,14 +229,28 @@ public class Harness {
 
         // Measured trials.
         int64[] samples = heap int64[trials];
+        float64[] tps = heap float64[trials];
+        int32 ntp = 0;
+        String tpUnit = "";
+        int32 reported = 0;
         int32 t = 0;
         while (t < trials) {
+            b.clearReported();
             int64 t0 = cfg.clock.nanoTime();
             b.runVariant(variant, 1);
             int64 t1 = cfg.clock.nanoTime();
             int64 dur = t1 - t0 - baseline;
             if (dur < 0) {
                 dur = 0;
+            }
+            if (b.reportedNsSet) {
+                dur = b.reportedNs;
+                reported = reported + 1;
+            }
+            if (b.reportedTpSet) {
+                tps[ntp] = b.reportedTp;
+                ntp = ntp + 1;
+                tpUnit = "" + b.reportedTpUnit;
             }
             samples[t] = dur;
             t = t + 1;
@@ -207,9 +265,11 @@ public class Harness {
         r.trials = trials;
         Harness.fillStats(r, samples, trials);
         Harness.fillThroughput(r);
+        Harness.fillReportedThroughput(r, tps, ntp, tpUnit);
         Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, ok);
-        r.notes #= Harness.notesFor(b, cfg, Harness.leadFor(b, ""));
+        String lead #= Harness.leadFor(b, Harness.reportedTag(reported, trials));
+        r.notes #= Harness.notesFor(b, cfg, variant, lead);
         return r;
     }
 
@@ -227,6 +287,7 @@ public class Harness {
 
         int32 w = 0;
         while (w < warm) {
+            b.clearReported();
             b.runVariant(variant, 1);
             b.runCompetitor(variant, 1);
             w = w + 1;
@@ -236,14 +297,28 @@ public class Harness {
 
         int64[] ours = heap int64[trials];
         int64[] comp = heap int64[trials];
+        float64[] tps = heap float64[trials];
+        int32 ntp = 0;
+        String tpUnit = "";
+        int32 reported = 0;
         int32 t = 0;
         while (t < trials) {
+            b.clearReported();
             int64 t0 = cfg.clock.nanoTime();
             b.runVariant(variant, 1);
             int64 t1 = cfg.clock.nanoTime();
             int64 d = t1 - t0 - baseline;
             if (d < 0) {
                 d = 0;
+            }
+            if (b.reportedNsSet) {
+                d = b.reportedNs;
+                reported = reported + 1;
+            }
+            if (b.reportedTpSet) {
+                tps[ntp] = b.reportedTp;
+                ntp = ntp + 1;
+                tpUnit = "" + b.reportedTpUnit;
             }
             ours[t] = d;
 
@@ -268,9 +343,16 @@ public class Harness {
         r.trials = trials;
         Harness.fillStats(r, ours, trials);
         Harness.fillThroughput(r);
+        Harness.fillReportedThroughput(r, tps, ntp, tpUnit);
         Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, okOurs);
-        r.notes #= Harness.notesFor(b, cfg, Harness.leadFor(b, "interleaved"));
+        String rtag #= Harness.reportedTag(reported, trials);
+        String lead0 = "interleaved";
+        if (!rtag.isEmpty()) {
+            lead0 = "interleaved; " + rtag;
+        }
+        String lead #= Harness.leadFor(b, lead0);
+        r.notes #= Harness.notesFor(b, cfg, variant, lead);
         rows.add(#r);
 
         String cl = b.competitorLanguage();
@@ -289,7 +371,7 @@ public class Harness {
         Harness.fillStats(c, comp, trials);
         Harness.fillThroughput(c);
         Harness.markChecked(c, okComp);
-        c.notes #= Harness.notesFor(b, cfg, "interleaved");
+        c.notes #= Harness.notesFor(b, cfg, variant, "interleaved");
         rows.add(#c);
     }
 
@@ -378,13 +460,17 @@ public class Harness {
         String ar = b.area();
         String be = b.backendFor(variant);
         String ds = b.datasetInfo();
-        String lib = b.library();
-        String libv = b.libraryVersion();
         String mach = b.machine();
         String un = b.unit();
         String mo = b.model();
-        String pl = b.platform();
         String drv #= cfg.driverFor(be);
+        String lang = b.languageFor(variant);
+        String lv = b.languageVersionFor(variant);
+        String pl = b.platformFor(variant);
+        String fl = b.flagsFor(variant);
+        String label = b.variantLabel(variant);
+        String lib = b.libraryFor(variant);
+        String libv = b.libraryVersionFor(variant);
 
         Result r = heap Result();
         // Owned copies of borrowed values — storing a borrow into a field
@@ -395,28 +481,41 @@ public class Harness {
         r.libraryVersion = "" + libv;
         r.benchmark = "" + nm;
         r.area = "" + ar;
-        r.variant = "" + variant;
+        r.variant = "" + label;
         r.datasetName = "" + ds;
-        r.language = "cajeta";
-        r.languageVersion = "" + cfg.languageVersion;
+        if (lang.isEmpty()) {
+            r.language = "cajeta";
+        } else {
+            r.language = "" + lang;
+        }
+        boolean cajetaRow = r.language.equals("cajeta");
+        if (lv.isEmpty() && cajetaRow) {
+            r.languageVersion = "" + cfg.languageVersion;
+        } else {
+            r.languageVersion = "" + lv;
+        }
         r.backend = "" + be;
-        r.flags = "" + cfg.flags;
+        if (fl.isEmpty() && cajetaRow) {
+            r.flags = "" + cfg.flags;
+        } else {
+            r.flags = "" + fl;
+        }
         r.throughputUnit = "" + un;
         r.machine = "" + mach;
         r.os = "" + cfg.os;
         r.driver = "" + drv;
         r.model = "" + mo;
         if (pl.isEmpty()) {
-            r.platform = "cajeta";
+            r.platform = "" + r.language;
         } else {
             r.platform = "" + pl;
         }
         return r;
     }
 
-    // notes = lead; competitorNote(); `smoke` — the non-empty parts, "; "-joined.
-    public static #String notesFor(Benchmark b, BenchConfig cfg, String lead) {
-        String note = b.competitorNote();
+    // notes = lead; noteFor(variant); `smoke` — the non-empty parts, "; "-joined.
+    public static #String notesFor(Benchmark b, BenchConfig cfg, String variant, String lead) {
+        String note = b.noteFor(variant);
         String s = "" + lead;
         if (!note.isEmpty()) {
             if (s.isEmpty()) {
@@ -441,7 +540,7 @@ public class Harness {
         Result r #= Harness.baseRow(b, cfg, variant);
         r.status = "skipped";
         r.checkOk = false;
-        r.notes #= Harness.notesFor(b, cfg, reason);
+        r.notes #= Harness.notesFor(b, cfg, variant, reason);
         return r;
     }
 
@@ -450,7 +549,7 @@ public class Harness {
         Result r #= Harness.baseRow(b, cfg, variant);
         r.status = "failed";
         r.checkOk = false;
-        r.notes #= Harness.notesFor(b, cfg, message);
+        r.notes #= Harness.notesFor(b, cfg, variant, message);
         return r;
     }
 

@@ -84,6 +84,11 @@ public class Benchmark {
     // (e.g. the v1 JSON DOM not parsing floats, so only integer-only inputs work)
     // returns false for the unsupported variants; the harness records a skip row
     // (with skipReason) instead of letting the workload throw.
+    // The skipped row's notes when available() is false.
+    public String unavailableReason() {
+        return "unavailable (dataset not configured or not fetched)";
+    }
+
     public boolean supportsVariant(String variant) {
         return true;
     }
@@ -151,7 +156,7 @@ public class Benchmark {
     // The engine or library that produced the row (`cajeta-llm 0.9.0 hip`,
     // `dev.cajeta.http 0.9.1`). Language and stdlib rows keep the language.
     public String platform() {
-        return "cajeta";
+        return "";
     }
 
     // The LLM or ML model identity with its quantization and checksum
@@ -236,5 +241,107 @@ public class Benchmark {
     // Default: skipReason().
     public String skipReasonFor(String variant) {
         return this.skipReason();
+    }
+
+    // ---- 0.1.4: figures measured inside the work ---------------------------
+    //
+    // A trial may report what it measured itself, for figures the harness's
+    // wall clock around runVariant cannot see: exec to the first 200, a build
+    // without its clean, a load generator's req/s. The harness clears both
+    // before every warmup and trial and reads them after it.
+    //
+    //   reportedNanos(ns)   replaces that trial's wall-clock time; the row's
+    //                       notes say `reported` (or `reported (k of n
+    //                       trials)` when only some trials reported).
+    //   reportedThroughput  the row's throughput is the median of the
+    //   (value, unit)       reported values and its unit the reported unit,
+    //                       in preference to the inputSize() derivation.
+
+    public int64 reportedNs;
+    public boolean reportedNsSet;
+    public float64 reportedTp;
+    public boolean reportedTpSet;
+    public String reportedTpUnit;
+
+    public void reportedNanos(int64 ns) {
+        this.reportedNs = ns;
+        this.reportedNsSet = true;
+    }
+
+    public void reportedThroughput(float64 value, String unit) {
+        this.reportedTp = value;
+        this.reportedTpSet = true;
+        this.reportedTpUnit = "" + unit;
+    }
+
+    // Called by the harness before every warmup and trial.
+    public void clearReported() {
+        this.reportedNs = (int64) -1;
+        this.reportedNsSet = false;
+        this.reportedTp = 0.0;
+        this.reportedTpSet = false;
+        this.reportedTpUnit = "";
+    }
+
+    // ---- 0.1.4: the row's identity, per benchmark and per variant ----------
+    //
+    // Every identity column can be set for the whole benchmark (language(),
+    // languageVersion(), platform(), library(), libraryVersion()) or per
+    // variant (the *For(variant) forms, which default to the whole-benchmark
+    // ones). A benchmark measuring several platforms returns one variant per
+    // platform: variant keys must be unique within one benchmark (they are how
+    // the harness, --variant and finishVariant tell them apart) and need not
+    // be unique across benchmarks. variantLabel(variant) is what the variant
+    // column says, so `primavera@64` and `spring-boot@64` can both be written
+    // as `64 connections`.
+    //
+    // Defaults: language `cajeta`; language_version "" means the compiler
+    // version (BenchConfig) on a cajeta row and empty otherwise; platform ""
+    // means the language; flags "" means BenchConfig.flags on a cajeta row and
+    // empty otherwise.
+
+    public String language() {
+        return "cajeta";
+    }
+
+    public String languageVersion() {
+        return "";
+    }
+
+    public String languageFor(String variant) {
+        return this.language();
+    }
+
+    public String languageVersionFor(String variant) {
+        return this.languageVersion();
+    }
+
+    public String platformFor(String variant) {
+        return this.platform();
+    }
+
+    public String libraryFor(String variant) {
+        return this.library();
+    }
+
+    public String libraryVersionFor(String variant) {
+        return this.libraryVersion();
+    }
+
+    public String variantLabel(String variant) {
+        return variant;
+    }
+
+    public String noteFor(String variant) {
+        return this.competitorNote();
+    }
+
+    public String flagsFor(String variant) {
+        return "";
+    }
+
+    // Called after each measured variant, whether it succeeded or threw: the
+    // place to stop what prepare(variant) started.
+    public void finishVariant(String variant) {
     }
 }

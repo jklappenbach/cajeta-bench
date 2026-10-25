@@ -15,7 +15,7 @@
 
     "details": {
         "name":               "dev.cajeta.bench",
-        "version":            "0.1.3",
+        "version":            "0.1.4",
         "description":        "cajeta-bench — benchmark harness: Benchmark contract, schema-v2 CSV rows, and the bench CLI",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -26,10 +26,11 @@
         // The harness times workloads (clock), writes the results CSV and reads
         // /proc and /etc/os-release (filesystem), reads CAJETA_BENCH_* and the
         // hostname from the environment (env), and runs nvidia-smi, hipconfig,
-        // vulkaninfo and `cmd /c ver` to record the driver and OS (process).
+        // vulkaninfo and `cmd /c ver` to record the driver and OS (process),
+        // and ServiceBenchmark probes a service's readiness over TCP (network).
         // Capabilities are re-validated against the consumer's manifest, so a
-        // consumer's bench project declares the same four.
-        "capabilities": ["filesystem", "clock", "env", "process"],
+        // consumer's bench project declares the same five.
+        "capabilities": ["filesystem", "clock", "env", "process", "network"],
 
         "dependencies": {},
 

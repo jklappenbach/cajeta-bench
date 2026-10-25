@@ -44,4 +44,19 @@ public class VariantTests {
         Assert.that(b.prepared).isEqualTo("sm");
         return;
     }
+
+    @Test
+    public void anUnavailableBenchmarkSkipsWithItsOwnReason() {
+        BenchConfig cfg = heap BenchConfig();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        UnavailableBench own = heap UnavailableBench(true);
+        Harness.measureInto(own, cfg, rows);
+        UnavailableBench dflt = heap UnavailableBench(false);
+        Harness.measureInto(dflt, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(2);
+        Assert.that(rows.get(0).status).isEqualTo("skipped");
+        Assert.that(rows.get(0).notes).isEqualTo("needs a ROCm device; none on this machine");
+        Assert.that(rows.get(1).notes).isEqualTo("unavailable (dataset not configured or not fetched)");
+        return;
+    }
 }

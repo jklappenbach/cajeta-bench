@@ -29,6 +29,9 @@
 #   UNIT_REPO  — path to a cajeta-unit checkout (default: ../cajeta-unit)
 #   OLLA_HOME  — local package store (default: ~/.olla)
 #   OLLA_URL   — registry base (default: https://olla.cajeta.dev)
+#   BENCH_TEST_TIMEOUT — seconds the test binary may run before it is
+#                        stopped (default 600), so a hang costs bounded time
+#   CAJETA_UNIT_FILTER — run only the tests it names (cajeta-unit)
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -168,4 +171,5 @@ echo ">> running"
     PATH="$(dirname "$cajeta_path"):$PATH" \
     CAJETA_BENCH_MACHINE=bench-test-machine \
     BENCH_TEST_EXPECT_CAJETA_VERSION="$expect_ver" \
-    BENCH_TEST_TMP="$out" ./benchtests )
+    BENCH_TEST_SERVER="$here/src/test/python/tiny_server.py" \
+    BENCH_TEST_TMP="$out" timeout "${BENCH_TEST_TIMEOUT:-600}" ./benchtests )

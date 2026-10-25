@@ -1,0 +1,47 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/**
+ * 0.1.4: reports a figure measured "inside the command" on each trial. Trial
+ * k (0-based, warmups excluded) reports nanos[k] and throughput tps[k].
+ */
+public class ReportingBench extends Benchmark {
+    public int32 calls;
+    public boolean reportNanos;
+    public boolean reportThroughput;
+
+    public ReportingBench(boolean reportNanos, boolean reportThroughput) {
+        this.calls = 0;
+        this.reportNanos = reportNanos;
+        this.reportThroughput = reportThroughput;
+    }
+
+    public String name() { return "reporting"; }
+    public String area() { return "test/reporting"; }
+    public int32 warmupIters() { return 1; }
+    public int32 measuredIters() { return 3; }
+    public int64 inputSize() { return (int64) 1000; }
+    public String unit() { return "items/s"; }
+
+    public void run(int32 iterations) {
+        int32 k = this.calls - 1;      // the first call is the warmup
+        this.calls = this.calls + 1;
+        if (k < 0) {
+            // warmup: report something that must be discarded
+            this.reportedNanos((int64) 999999);
+            this.reportedThroughput(1.0, "req/s");
+            return;
+        }
+        if (this.reportNanos) {
+            if (k == 0) { this.reportedNanos((int64) 500); }
+            if (k == 1) { this.reportedNanos((int64) 100); }
+            if (k == 2) { this.reportedNanos((int64) 300); }
+        }
+        if (this.reportThroughput) {
+            if (k == 0) { this.reportedThroughput(100.25, "req/s"); }
+            if (k == 1) { this.reportedThroughput(300.5, "req/s"); }
+            if (k == 2) { this.reportedThroughput(200.125, "req/s"); }
+        }
+    }
+}

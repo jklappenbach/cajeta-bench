@@ -1,0 +1,130 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/** 0.1.4: reportedNanos, reportedThroughput, per-row identity, finishVariant. */
+public class ReportedTests {
+
+    public ReportedTests() {
+        return;
+    }
+
+    // Wall-clock trials of 10, 30, 20 ns, so a reported figure is told apart.
+    static #BenchConfig scripted() {
+        int64[] s = heap int64[6];
+        s[0] = 0;   s[1] = 10;
+        s[2] = 100; s[3] = 130;
+        s[4] = 200; s[5] = 220;
+        FakeClock fc = heap FakeClock(#s);
+        BenchConfig cfg = heap BenchConfig();
+        cfg.useClock(#fc);
+        return cfg;
+    }
+
+    @Test
+    public void reportedNanosReplaceTheWallClockAndSaySo() {
+        BenchConfig cfg #= ReportedTests.scripted();
+        ReportingBench b = heap ReportingBench(true, false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.minNs).isEqualTo(100);
+        Assert.that(r.medianNs).isEqualTo(300);
+        Assert.that(r.p95Ns).isEqualTo(500);
+        Assert.that(r.meanNs).isEqualTo(300);
+        Assert.that(r.notes).contains("reported");
+        // inputSize-derived throughput reads the reported median: 1000 / 300 ns.
+        Assert.that(r.throughput).isEqualTo("3333333333.333");
+        return;
+    }
+
+    @Test
+    public void wallClockRowsAreNotMarkedReported() {
+        BenchConfig cfg #= ReportedTests.scripted();
+        ReportingBench b = heap ReportingBench(false, false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.medianNs).isEqualTo(20);
+        Assert.isFalse(r.notes.contains("reported"));
+        return;
+    }
+
+    @Test
+    public void reportedThroughputWinsOverTheInputSizeDerivation() {
+        BenchConfig cfg #= ReportedTests.scripted();
+        ReportingBench b = heap ReportingBench(false, true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        // median of 100.25, 300.5, 200.125; the warmup's 1.0 is discarded.
+        Assert.that(r.throughput).isEqualTo("200.125");
+        Assert.that(r.throughputUnit).isEqualTo("req/s");
+        Assert.that(r.medianNs).isEqualTo(20);
+        return;
+    }
+
+    @Test
+    public void everyPlatformVariantCarriesItsOwnIdentity() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.languageVersion = "0.46.3";
+        cfg.flags = "--release -O3";
+        PlatformsBench b = heap PlatformsBench(false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(2);
+        Result p = rows.get(0);
+        Assert.that(p.variant).isEqualTo("64 connections");
+        Assert.that(p.language).isEqualTo("cajeta");
+        Assert.that(p.languageVersion).isEqualTo("0.46.3");
+        Assert.that(p.platform).isEqualTo("primavera 0.4.0");
+        Assert.that(p.library).isEqualTo("dev.cajeta.primavera");
+        Assert.that(p.libraryVersion).isEqualTo("0.4.0");
+        Assert.that(p.flags).isEqualTo("--release -O3");
+        Assert.that(p.notes).isEqualTo("oha 1.4.5; primavera@64");
+        Result s = rows.get(1);
+        Assert.that(s.variant).isEqualTo("64 connections");
+        Assert.that(s.language).isEqualTo("java");
+        Assert.that(s.languageVersion).isEqualTo("25");
+        Assert.that(s.platform).isEqualTo("Spring Boot 3.5.0");
+        Assert.that(s.library).isEqualTo("spring-boot");
+        Assert.that(s.libraryVersion).isEqualTo("3.5.0");
+        Assert.that(s.flags).isEqualTo("as shipped");
+        Assert.that(b.finished).isEqualTo("primavera@64;spring-boot@64;");
+        return;
+    }
+
+    @Test
+    public void aBenchmarkCanBeAnotherLanguageThroughout() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.languageVersion = "0.46.3";
+        PythonBench b = heap PythonBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.language).isEqualTo("python");
+        Assert.that(r.languageVersion).isEqualTo("3.12.3");
+        Assert.that(r.platform).isEqualTo("fastapi 0.115");
+        Assert.that(r.library).isEqualTo("fastapi");
+        Assert.that(r.libraryVersion).isEqualTo("0.115.0");
+        // cajeta's flags are not another language's
+        Assert.that(r.flags).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void finishVariantRunsAfterAFailedVariantToo() {
+        BenchConfig cfg = heap BenchConfig();
+        PlatformsBench b = heap PlatformsBench(true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(1).status).isEqualTo("failed");
+        Assert.that(rows.get(1).language).isEqualTo("java");
+        Assert.that(b.finished).isEqualTo("primavera@64;spring-boot@64;");
+        return;
+    }
+}
