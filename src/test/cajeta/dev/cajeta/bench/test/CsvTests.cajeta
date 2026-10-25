@@ -4,6 +4,9 @@ import cajeta.collection.ArrayList;
 import dev.cajeta.unit.Assert;
 import dev.cajeta.bench.report.Csv;
 import dev.cajeta.bench.report.Result;
+import dev.cajeta.bench.report.Report;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
 
 /** Plan 1.1.3: the schema-v2 header, in order, and rows that match it. */
 public class CsvTests {
@@ -60,6 +63,96 @@ public class CsvTests {
         Assert.that(text).startsWith(h + "\n2,");
         String rendered #= Csv.render(rows);
         Assert.that(text).isEqualTo(rendered);
+        return;
+    }
+
+    // ---- 0.1.3: free text with commas, quotes, newlines and UTF-8 ----------
+
+    @Test
+    public void everyFreeTextColumnRoundTripsThroughRfc4180() {
+        Result r = heap Result();
+        r.notes = "llama.cpp b6123 — built -DGGML_HIP=ON, -O3; \"fast\"\nsecond line";
+        r.library = "dev.cajeta.ml, fork";
+        r.flags = "--release,-O3";
+        r.datasetName = "café, 1 GB";
+        r.model = "Llama-3.1-8B Q4_K_M, sha256:abc";
+        r.platform = "cajeta-llm 0.9.0 — hip, gfx1151";
+        r.driver = "Vulkan radv Mesa 25.0.7 (LLVM 20.1.2, 256 bits)";
+        r.os = "Débian, 12";
+        r.variant = "q4_k_m,4seq";
+        r.machine = "phönix";
+        r.benchmark = "decode";
+        String row #= r.toRow();
+        ArrayList<String> f #= TestFiles.fields(row);
+        Assert.that((int64) f.count()).isEqualTo(37);
+        Assert.that(f.get(0)).isEqualTo("2");
+        Assert.that(f.get(3)).isEqualTo("decode");
+        Assert.that(f.get(5)).isEqualTo(r.datasetName);
+        Assert.that(f.get(11)).isEqualTo(r.library);
+        Assert.that(f.get(13)).isEqualTo(r.flags);
+        Assert.that(f.get(29)).isEqualTo(r.notes);
+        Assert.that(f.get(30)).isEqualTo(r.variant);
+        Assert.that(f.get(32)).isEqualTo(r.machine);
+        Assert.that(f.get(33)).isEqualTo(r.os);
+        Assert.that(f.get(34)).isEqualTo(r.driver);
+        Assert.that(f.get(35)).isEqualTo(r.model);
+        Assert.that(f.get(36)).isEqualTo(r.platform);
+        return;
+    }
+
+    @Test
+    public void numericFieldsStayBare() {
+        Result r = heap Result();
+        r.notes = "a, b";
+        String row #= r.toRow();
+        Assert.that(row).startsWith("2,,,,,,-1,,-1,");
+        Assert.that(row).contains(",0,0,-1,-1,-1,-1,,,-1,-1,-1,-1,-1,ok,true,\"a, b\",");
+        return;
+    }
+
+    @Test
+    public void aCommaAfterUtf8IsStillQuoted() {
+        // The 0.1.2 bug: Csv.field scanned String.count() (codepoints) bytes,
+        // so a comma past a multi-byte character went unquoted.
+        String q #= Csv.field("———,x");
+        Assert.that(q).isEqualTo("\"———,x\"");
+        String e #= Csv.field("naïve \"q\"");
+        Assert.that(e).isEqualTo("\"naïve \"\"q\"\"\"");
+        String plain #= Csv.field("café");
+        Assert.that(plain).isEqualTo("café");
+        return;
+    }
+
+    @Test
+    public void aCompetitorNoteWithACommaKeepsTheColumns() {
+        BenchConfig cfg = heap BenchConfig();
+        CommaNoteBench b = heap CommaNoteBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        String path #= TestFiles.scratch("comma-note.csv");
+        Csv.write(path, rows);
+        String text #= TestFiles.read(path);
+        int64 nl = text.indexOf("\n");
+        String body #= text.substring((int32) nl + 1, text.byteLength());
+        ArrayList<String> f #= TestFiles.fields(body);
+        Assert.that((int64) f.count()).isEqualTo(37);
+        Assert.that(f.get(29)).isEqualTo("built with -O3, -march=native — \"vendored\"");
+        Assert.that(f.get(36)).isEqualTo("cajeta");
+        return;
+    }
+
+    @Test
+    public void envCsvValuesAreQuotedToo() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.flags = "--release, -O3 — native";
+        cfg.os = "Débian, 12";
+        cfg.runId = "run,1";
+        String path #= TestFiles.scratch("quoted-env.csv");
+        Report.writeEnv(path, cfg);
+        String text #= TestFiles.read(path);
+        Assert.that(text).contains("\nflags,\"--release, -O3 — native\"\n");
+        Assert.that(text).contains("\nos,\"Débian, 12\"\n");
+        Assert.that(text).contains("\nrun_id,\"run,1\"\n");
         return;
     }
 }

@@ -28,7 +28,7 @@ public class Report {
             return "env.csv";
         }
         if (resultsPath.endsWith("/results.csv")) {
-            int32 n = (int32) resultsPath.count();
+            int32 n = resultsPath.byteLength();
             return resultsPath.substring(0, n - 11) + "env.csv";
         }
         return resultsPath + ".env.csv";

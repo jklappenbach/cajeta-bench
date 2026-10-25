@@ -133,4 +133,14 @@ public class DetectTests {
         Assert.that(DriverDetect.family("cpu")).isEqualTo("");
         return;
     }
+
+    @Test
+    public void osReleaseValuesWithUtf8AreReadWhole() {
+        String rel = "PRETTY_NAME=\"Débian GNU/Linux 12 (bookworm)\"\nNAME=\"Débian GNU/Linux\"\nVERSION_ID=\"12\"\nID=debian\n";
+        String os #= OsDetect.fromLinux(rel, "Linux version 6.1.0-18-amd64");
+        Assert.that(os).isEqualTo("Débian GNU/Linux 12");
+        String vk #= DriverDetect.fromVulkanInfo("GPU0:\n\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU\n\tdriverName = NVIDIA\n\tdriverInfo = 610.88 — r610\n");
+        Assert.that(vk).isEqualTo("Vulkan NVIDIA 610.88 — r610");
+        return;
+    }
 }

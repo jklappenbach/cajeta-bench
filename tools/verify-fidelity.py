@@ -51,7 +51,7 @@ STATUSES = {1: {"ok", "skipped", "invalid"}, 2: {"ok", "skipped", "invalid", "fa
 def load(path):
     if os.path.isdir(path):
         path = os.path.join(path, "results.csv")
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
         return list(reader.fieldnames or []), rows

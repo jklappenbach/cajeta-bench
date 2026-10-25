@@ -7,18 +7,21 @@ import cajeta.io.file.FileWriter;
 import cajeta.io.file.OpenMode;
 import dev.cajeta.bench.report.Result;
 
-// Minimal RFC-4180-ish CSV field escaping for the report writer. A field is
+// RFC 4180 CSV field escaping for the report writer. A field is
 // quoted only when it contains a comma, double-quote, CR or LF; inside a quoted
 // field, embedded double-quotes are doubled. Numbers and simple tokens pass
 // through unquoted so the CSV stays human- and pandas-friendly.
 public class Csv {
 
     // ASCII bytes we must guard against: ',' 44, '"' 34, '\n' 10, '\r' 13.
+    // Scanned by BYTE (byteLength/byteAt/substring are byte-indexed;
+    // String.count() is codepoints, which in 0.1.0-0.1.2 left the tail of
+    // any field holding a multi-byte character unscanned and uncopied).
     public static #String field(String s) {
         if (s == null) {
             return "";
         }
-        int32 n = (int32) s.count();
+        int32 n = s.byteLength();
         boolean needsQuote = false;
         int32 i = 0;
         while (i < n) {

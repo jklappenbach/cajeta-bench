@@ -127,7 +127,7 @@ public final class BenchMain {
     public static int32 list(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter,
                              String variantFilter, boolean verbose) {
         String text #= BenchMain.listing(benchmarks, areaFilter, benchFilter, variantFilter, verbose);
-        int32 n = (int32) text.count();
+        int32 n = text.byteLength();
         if (n > 0) {
             // println adds the final newline back.
             System.stdout.println(text.substring(0, n - 1));
@@ -204,7 +204,7 @@ public final class BenchMain {
     // when missing. Returns "" when the path is ready, else the error, naming
     // the path, that run() prints before exiting 2.
     public static #String prepareOut(String outPath) {
-        int32 n = (int32) outPath.count();
+        int32 n = outPath.byteLength();
         int32 slash = -1;
         int32 i = 0;
         while (i < n) {

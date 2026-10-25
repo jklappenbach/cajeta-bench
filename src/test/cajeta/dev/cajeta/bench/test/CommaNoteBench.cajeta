@@ -1,0 +1,16 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** 0.1.3: a competitor note holding a comma, quotes and a multi-byte dash. */
+public class CommaNoteBench extends Benchmark {
+    public CommaNoteBench() {
+        return;
+    }
+
+    public String name() { return "comma-note"; }
+    public String area() { return "test/csv"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 3; }
+    public String competitorNote() { return "built with -O3, -march=native — \"vendored\""; }
+}

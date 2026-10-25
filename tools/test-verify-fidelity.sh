@@ -40,5 +40,9 @@ expect 0 "$fx/v2-math-matmul-ok-beside-xpu.csv"
 # allocation count; any other measured cajeta row still must.
 expect 0 "$fx/v2-external-no-alloc.csv"
 expect 1 "$fx/v2-alloc-missing.csv"
+# 0.1.3: RFC 4180 quoted fields (commas, doubled quotes, a newline, UTF-8)
+# are one field each; the row keeps its 37 columns and its machine/platform.
+expect 0 "$fx/v2-quoted-fields.csv"
+expect 0 --no-smoke "$fx/v2-quoted-fields.csv"
 
 [[ "$fails" -eq 0 ]] && echo "verify-fidelity: all cases pass" || { echo "verify-fidelity: $fails case(s) failed"; exit 1; }

@@ -12,7 +12,7 @@ library the way `dev.cajeta.unit` is the test library
 // your bench project's cajeta.json
 "settings": {
     "capabilities": ["filesystem", "clock", "env", "process"],
-    "dependencies": { "dev.cajeta.bench": "0.1.2" },
+    "dependencies": { "dev.cajeta.bench": "0.1.3" },
     "build": { "entry-method": "my.bench.Main::main" }
 },
 "tasks": {
@@ -156,6 +156,12 @@ schema_version,run_id,timestamp_unix,benchmark,area,dataset_name,dataset_bytes,d
 
 `status` is `ok`, `skipped`, `invalid` (the correctness check failed) or
 `failed` (the benchmark threw).
+
+Fields are RFC 4180: one containing a comma, a double quote, CR or LF is
+quoted, with inner quotes doubled; numbers stay bare. The file is UTF-8, and
+0.1.3 fixed a bug where a field holding a multi-byte character was scanned
+and copied short, so a comma past an em dash went unquoted and shifted the
+columns. `env.csv` values follow the same rule.
 
 `tools/verify-fidelity.py <results.csv>` checks a file of either schema
 (header shape, per-row version and status, and on v2 a machine and platform on

@@ -113,12 +113,12 @@ public final class Sys {
         if (at < 0) {
             return "";
         }
-        int32 n = (int32) text.count();
-        int32 start = (int32) at + (int32) needle.count();
+        int32 n = text.byteLength();
+        int32 start = (int32) at + needle.byteLength();
         int32 end = Sys.lineEnd(text, start);
         String raw #= text.substring(start, end);
         String v #= raw.trim();
-        int32 vn = (int32) v.count();
+        int32 vn = v.byteLength();
         if (vn >= 2 && v.byteAt(0) == 34 && v.byteAt(vn - 1) == 34) {
             return v.substring(1, vn - 1);
         }
@@ -134,8 +134,8 @@ public final class Sys {
         if (at < 0) {
             return "";
         }
-        int32 n = (int32) text.count();
-        int32 i = (int32) at + (int32) label.count();
+        int32 n = text.byteLength();
+        int32 i = (int32) at + label.byteLength();
         while (i < n && Sys.isSpace(text.byteAt(i))) {
             i = i + 1;
         }
@@ -158,7 +158,7 @@ public final class Sys {
 
     /** Index of the '\n' (or '\r') ending the line that starts at `from`. */
     public static int32 lineEnd(String text, int32 from) {
-        int32 n = (int32) text.count();
+        int32 n = text.byteLength();
         int32 i = from;
         while (i < n) {
             int8 c = text.byteAt(i);
