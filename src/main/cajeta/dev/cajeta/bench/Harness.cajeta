@@ -41,6 +41,13 @@ public class Harness {
     // prepare(variant) builds each variant's input; teardown() runs once at
     // the end.
     public static void measureInto(Benchmark b, BenchConfig cfg, ArrayList<Result> rows) {
+        // --variant: a benchmark without that label contributes nothing, and
+        // is not set up.
+        if (!cfg.variantFilter.isEmpty()) {
+            if (!Harness.hasVariant(b, cfg.variantFilter)) {
+                return;
+            }
+        }
         if (!b.available()) {
             rows.add(Harness.skippedRow(b, cfg, "",
                 "unavailable (dataset not configured or not fetched)"));
@@ -62,9 +69,11 @@ public class Harness {
         int32 vn = vs.count();
         while (vi < vn) {
             String v = vs.get(vi);
-            if (b.supportsVariant(v)) {
+            if (!cfg.variantFilter.isEmpty() && !v.equals(cfg.variantFilter)) {
+                // not selected
+            } else if (b.supportsVariant(v)) {
                 try {
-                    if (Harness.interleaves(b)) {
+                    if (Harness.interleaves(b, v)) {
                         Harness.measureInterleavedInto(b, cfg, v, rows);
                     } else {
                         // Owned temporary straight into the list.
@@ -75,7 +84,7 @@ public class Harness {
                     rows.add(Harness.failedRow(b, cfg, v, msg));
                 }
             } else {
-                String why = b.skipReason();
+                String why = b.skipReasonFor(v);
                 rows.add(Harness.skippedRow(b, cfg, v, why));
             }
             vi = vi + 1;
@@ -88,13 +97,55 @@ public class Harness {
         }
     }
 
-    // True when `b` is measured in interleaved rounds against its competitor.
-    public static boolean interleaves(Benchmark b) {
+    // True when `b`'s `variant` is measured in interleaved rounds against its competitor.
+    public static boolean interleaves(Benchmark b, String variant) {
         if (!b.hasCompetitor()) {
             return false;
         }
-        String be = b.backend();
+        String be = b.backendFor(variant);
         return !be.equals("cpu");
+    }
+
+    public static boolean hasVariant(Benchmark b, String label) {
+        ArrayList<String> vs #= b.variants();
+        int32 i = 0;
+        int32 n = vs.count();
+        while (i < n) {
+            String v = vs.get(i);
+            if (v.equals(label)) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // throughput = inputSize / median seconds, three decimals, when the
+    // benchmark declares an input size and the median is positive.
+    public static void fillThroughput(Result r) {
+        if (r.inputSize < 0 || r.medianNs <= 0) {
+            return;
+        }
+        float64 perSec = ((float64) r.inputSize) * 1000000000.0 / ((float64) r.medianNs);
+        r.throughput #= Harness.fixed3(perSec);
+    }
+
+    // `v` with exactly three decimals, rounded half up ("" for a negative or
+    // out-of-range value).
+    public static #String fixed3(float64 v) {
+        if (v < 0.0 || v > 9000000000000000.0) {
+            return "";
+        }
+        int64 scaled = (int64) (v * 1000.0 + 0.5);
+        int64 whole = scaled / 1000;
+        int64 frac = scaled % 1000;
+        String f = "" + frac;
+        if (frac < 10) {
+            f = "00" + frac;
+        } else if (frac < 100) {
+            f = "0" + frac;
+        }
+        return "" + whole + "." + f;
     }
 
     public static int32 warmupFor(Benchmark b, BenchConfig cfg) {
@@ -155,6 +206,7 @@ public class Harness {
         r.warmup = warm;
         r.trials = trials;
         Harness.fillStats(r, samples, trials);
+        Harness.fillThroughput(r);
         Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, ok);
         r.notes #= Harness.notesFor(b, cfg, Harness.leadFor(b, ""));
@@ -215,6 +267,7 @@ public class Harness {
         r.warmup = warm;
         r.trials = trials;
         Harness.fillStats(r, ours, trials);
+        Harness.fillThroughput(r);
         Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, okOurs);
         r.notes #= Harness.notesFor(b, cfg, Harness.leadFor(b, "interleaved"));
@@ -234,6 +287,7 @@ public class Harness {
         c.warmup = warm;
         c.trials = trials;
         Harness.fillStats(c, comp, trials);
+        Harness.fillThroughput(c);
         Harness.markChecked(c, okComp);
         c.notes #= Harness.notesFor(b, cfg, "interleaved");
         rows.add(#c);
@@ -322,8 +376,10 @@ public class Harness {
         // result inline into a field has bitten us before — bind, then store).
         String nm = b.name();
         String ar = b.area();
-        String be = b.backend();
+        String be = b.backendFor(variant);
         String ds = b.datasetInfo();
+        String lib = b.library();
+        String libv = b.libraryVersion();
         String mach = b.machine();
         String un = b.unit();
         String mo = b.model();
@@ -334,6 +390,9 @@ public class Harness {
         // Owned copies of borrowed values — storing a borrow into a field
         // that outlives the call dangles after return.
         r.runId = "" + cfg.runId;
+        r.timestampUnix = "" + cfg.clock.unixSeconds();
+        r.library = "" + lib;
+        r.libraryVersion = "" + libv;
         r.benchmark = "" + nm;
         r.area = "" + ar;
         r.variant = "" + variant;

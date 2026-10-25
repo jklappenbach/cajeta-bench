@@ -1,0 +1,141 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/** 0.1.2: throughput, timestamps, library columns, compiler version, per-variant backend and skip reason. */
+public class RowFieldTests {
+
+    public RowFieldTests() {
+        return;
+    }
+
+    // Three trials of exactly `ns` each.
+    static #BenchConfig steadyClock(int64 ns) {
+        int64[] s = heap int64[6];
+        s[0] = 0;          s[1] = ns;
+        s[2] = 10 * ns;    s[3] = 11 * ns;
+        s[4] = 20 * ns;    s[5] = 21 * ns;
+        FakeClock fc = heap FakeClock(#s);
+        BenchConfig cfg = heap BenchConfig();
+        cfg.useClock(#fc);
+        return cfg;
+    }
+
+    static #String throughputOf(int64 size, int64 medianNs, String unit) {
+        BenchConfig cfg #= RowFieldTests.steadyClock(medianNs);
+        SizedBench b = heap SizedBench(size, unit);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.throughputUnit).isEqualTo(unit);
+        return "" + r.throughput;
+    }
+
+    @Test
+    public void throughputIsInputSizeOverMedianSeconds() {
+        // 5000 items in 1 ms = 5,000,000 items/s.
+        String a #= RowFieldTests.throughputOf((int64) 5000, (int64) 1000000, "items/s");
+        Assert.that(a).isEqualTo("5000000.000");
+        // 1 item in 3 s = 0.333 items/s.
+        String b #= RowFieldTests.throughputOf((int64) 1, (int64) 3000000000, "items/s");
+        Assert.that(b).isEqualTo("0.333");
+        // 2 tokens in 3 ms = 666.667 tokens/s (rounded, not truncated).
+        String c #= RowFieldTests.throughputOf((int64) 2, (int64) 3000000, "tokens/s");
+        Assert.that(c).isEqualTo("666.667");
+        return;
+    }
+
+    @Test
+    public void noInputSizeMeansNoThroughput() {
+        String a #= RowFieldTests.throughputOf((int64) -1, (int64) 1000000, "items/s");
+        Assert.that(a).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void everyRowCarriesAUnixTimestamp() {
+        BenchConfig cfg = heap BenchConfig();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        CountingBench ok = heap CountingBench();
+        Harness.measureInto(ok, cfg, rows);
+        ThrowingBench t = heap ThrowingBench();
+        Harness.measureInto(t, cfg, rows);
+        VariantsBench v = heap VariantsBench(true);
+        Harness.measureInto(v, cfg, rows);
+        int32 i = 0;
+        while (i < rows.count()) {
+            Result r = rows.get(i);
+            Assert.that((int64) r.timestampUnix.count()).isEqualTo(10);
+            Assert.that(r.timestampUnix).startsWith("1");
+            Assert.isTrue(r.timestampUnix > "1700000000");
+            i = i + 1;
+        }
+        Assert.that(rows.get(1).status).isEqualTo("failed");
+        Assert.that(rows.get(4).status).isEqualTo("skipped");
+        return;
+    }
+
+    @Test
+    public void libraryHooksFeedTheLibraryColumns() {
+        BenchConfig cfg = heap BenchConfig();
+        SizedBench b = heap SizedBench((int64) 10, "items/s");
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(0).library).isEqualTo("dev.cajeta.ml");
+        Assert.that(rows.get(0).libraryVersion).isEqualTo("0.10.6");
+        CountingBench c = heap CountingBench();
+        Harness.measureInto(c, cfg, rows);
+        Assert.that(rows.get(1).library).isEqualTo("");
+        Assert.that(rows.get(1).libraryVersion).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void theCompilerVersionIsParsedFromCajetaVersion() {
+        String v #= BenchConfig.parseCajetaVersion("cajeta 0.46.3 (b5689bda)\n");
+        Assert.that(v).isEqualTo("0.46.3");
+        String none #= BenchConfig.parseCajetaVersion("");
+        Assert.that(none).isEqualTo("");
+        String odd #= BenchConfig.parseCajetaVersion("something else\n");
+        Assert.that(odd).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void languageVersionDefaultsToTheCompilerOnPath() {
+        // run-tests.sh unsets CAJETA_BENCH_CAJETA_VERSION and exports what
+        // `cajeta --version` says, with that compiler first on PATH.
+        String expect = System.env.get("BENCH_TEST_EXPECT_CAJETA_VERSION");
+        Assert.isTrue(expect != null);
+        BenchConfig cfg #= BenchConfig.fromEnv();
+        Assert.that(cfg.languageVersion).isEqualTo(expect);
+        Assert.that(cfg.languageVersion).isNotEmpty();
+        CountingBench b = heap CountingBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(0).languageVersion).isEqualTo(expect);
+        return;
+    }
+
+    @Test
+    public void backendAndSkipReasonAreReadPerVariant() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.setDriver("cuda", "NVIDIA 610.88 CUDA 13.3");
+        MixedBackendBench b = heap MixedBackendBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(3);
+        Assert.that(rows.get(0).backend).isEqualTo("cpu");
+        Assert.that(rows.get(0).driver).isEqualTo("");
+        Assert.that(rows.get(1).backend).isEqualTo("cuda");
+        Assert.that(rows.get(1).driver).isEqualTo("NVIDIA 610.88 CUDA 13.3");
+        Assert.that(rows.get(2).backend).isEqualTo("vulkan");
+        Assert.that(rows.get(2).status).isEqualTo("skipped");
+        Assert.that(rows.get(2).notes).isEqualTo("no vulkan device on this machine");
+        return;
+    }
+}

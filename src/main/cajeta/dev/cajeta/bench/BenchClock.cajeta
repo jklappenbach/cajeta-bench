@@ -15,4 +15,9 @@ public class BenchClock {
     public int64 nanoTime() {
         return Clock.nanoTime();
     }
+
+    // Wall-clock seconds since the Unix epoch, for timestamp_unix.
+    public int64 unixSeconds() {
+        return Clock.millisTime() / 1000;
+    }
 }

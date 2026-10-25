@@ -1,0 +1,42 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.bench.Benchmark;
+
+/** Variants on different backends, one unsupported with its own reason (0.1.2). */
+public class MixedBackendBench extends Benchmark {
+    public MixedBackendBench() {
+        return;
+    }
+
+    public String name() { return "mixed"; }
+    public String area() { return "xpu/mixed"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 3; }
+
+    public #ArrayList<String> variants() {
+        ArrayList<String> v = heap ArrayList<String>();
+        v.add("host");
+        v.add("cuda");
+        v.add("vulkan");
+        return v;
+    }
+
+    public String backendFor(String variant) {
+        if (variant.equals("host")) {
+            return "cpu";
+        }
+        return variant;
+    }
+
+    public boolean supportsVariant(String variant) {
+        return !variant.equals("vulkan");
+    }
+
+    public String skipReasonFor(String variant) {
+        if (variant.equals("vulkan")) {
+            return "no vulkan device on this machine";
+        }
+        return this.skipReason();
+    }
+}

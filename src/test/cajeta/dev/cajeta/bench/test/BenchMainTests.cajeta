@@ -161,4 +161,72 @@ public class BenchMainTests {
         Assert.that(there).isEqualTo("");
         return;
     }
+
+    // ---- 0.1.2: --variant and --list --verbose -----------------------------
+
+    @Test
+    public void variantSelectsOneVariantOfTheSelectedBenchmarks() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String out #= TestFiles.scratch("main-variant.csv");
+        String[] args = heap String[7];
+        args[0] = "--run";
+        args[1] = "--bench";
+        args[2] = "variants";
+        args[3] = "--variant";
+        args[4] = "medium";
+        args[5] = "--out";
+        args[6] = "" + out;
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(0);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(2);
+        Assert.that(text).contains(",medium,");
+        return;
+    }
+
+    @Test
+    public void aVariantNoBenchmarkHasMatchesNothing() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String out #= TestFiles.scratch("main-novariant.csv");
+        String[] args = heap String[5];
+        args[0] = "--run";
+        args[1] = "--variant";
+        args[2] = "enormous";
+        args[3] = "--out";
+        args[4] = "" + out;
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(1);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(1);
+        return;
+    }
+
+    @Test
+    public void verboseListingShowsVariantsAndBackends() {
+        ArrayList<Benchmark> list = heap ArrayList<Benchmark>();
+        list.add(heap VariantsBench(true));
+        list.add(heap MixedBackendBench());
+        String plain #= BenchMain.listing(list, null, null, null, false);
+        Assert.that(plain).contains("test/variants/variants");
+        Assert.that(plain).contains("xpu/mixed/mixed");
+        Assert.isFalse(plain.contains("medium"));
+        String full #= BenchMain.listing(list, null, null, null, true);
+        Assert.that(full).contains("medium [cpu]");
+        Assert.that(full).contains("large [cpu] skipped: large needs the 1 GB corpus");
+        Assert.that(full).contains("cuda [cuda]");
+        Assert.that(full).contains("vulkan [vulkan] skipped: no vulkan device on this machine");
+        String one #= BenchMain.listing(list, null, null, "cuda", true);
+        Assert.isFalse(one.contains("test/variants/variants"));
+        Assert.isFalse(one.contains("host [cpu]"));
+        Assert.that(one).contains("cuda [cuda]");
+        return;
+    }
+
+    @Test
+    public void verboseIsAcceptedWithList() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String[] args = heap String[2];
+        args[0] = "--list";
+        args[1] = "--verbose";
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(0);
+        return;
+    }
 }

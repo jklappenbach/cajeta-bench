@@ -65,8 +65,10 @@ public class Benchmark {
         return (int64) 0;
     }
 
-    // Input size in bytes/elements for the current variant (lets the report
-    // derive throughput, e.g. MB/s). -1 = not applicable.
+    // Input size for the current variant, in the numerator unit of unit():
+    // the harness writes throughput = inputSize / median seconds, labelled
+    // unit() (so unit() "MB/s" wants inputSize in MB, "items/s" in items).
+    // -1 = not applicable, and the throughput column stays empty.
     public int64 inputSize() {
         return (int64) -1;
     }
@@ -207,5 +209,32 @@ public class Benchmark {
     // trials; -1 when it cannot be measured. Read only when external().
     public int64 measuredPeakRssKb() {
         return (int64) -1;
+    }
+
+    // ---- 0.1.2 -------------------------------------------------------------
+
+    // The library the row measures, for the `library` / `library_version`
+    // columns (`dev.cajeta.ml` / `0.10.6`, `dev.cajeta.llm` / `0.9.0`).
+    // "" for language and stdlib rows.
+    public String library() {
+        return "";
+    }
+
+    public String libraryVersion() {
+        return "";
+    }
+
+    // The backend one variant runs on. The harness reads this, not backend(),
+    // for the row's backend and driver columns and for interleaving, so a
+    // benchmark whose variants span devices (host / cuda / vulkan) says so
+    // per variant. Default: backend() for every variant.
+    public String backendFor(String variant) {
+        return this.backend();
+    }
+
+    // Why `variant` is skipped when supportsVariant(variant) is false.
+    // Default: skipReason().
+    public String skipReasonFor(String variant) {
+        return this.skipReason();
     }
 }

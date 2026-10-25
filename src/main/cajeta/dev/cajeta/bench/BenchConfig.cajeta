@@ -3,6 +3,7 @@ package dev.cajeta.bench;
 import dev.cajeta.bench.BenchClock;
 import dev.cajeta.bench.detect.OsDetect;
 import dev.cajeta.bench.detect.DriverDetect;
+import dev.cajeta.bench.detect.Sys;
 
 /**
  * Everything about one run that is not a benchmark: the run id, smoke mode,
@@ -14,7 +15,8 @@ import dev.cajeta.bench.detect.DriverDetect;
  *   CAJETA_BENCH_SMOKE           1/true: warmup 1, trials 3, rows tagged `smoke`
  *   CAJETA_BENCH_RUN_ID          the run id (PROFILE_RUN_ID still honored)
  *   CAJETA_BENCH_CAJETA_VERSION  language_version of cajeta rows
- *                                (PROFILE_CAJETA_VERSION still honored)
+ *                                (PROFILE_CAJETA_VERSION still honored);
+ *                                unset: `cajeta --version` on PATH
  *   CAJETA_BENCH_FLAGS           the flags column of cajeta rows
  *   CAJETA_BENCH_MACHINE         read per row by Benchmark.machine()
  */
@@ -25,6 +27,8 @@ public class BenchConfig {
     public String flags;
     public String os;
     public BenchClock clock;
+    // Measure only this variant label ("" = every variant). BenchMain --variant.
+    public String variantFilter;
 
     public String nvidiaDriver;
     public String rocmDriver;
@@ -42,6 +46,7 @@ public class BenchConfig {
         this.flags = "--release -O3 -march=native";
         this.os = "";
         this.clock = heap BenchClock();
+        this.variantFilter = "";
         this.nvidiaDriver = "";
         this.rocmDriver = "";
         this.vulkanDriver = "";
@@ -60,6 +65,8 @@ public class BenchConfig {
         String ver #= BenchConfig.envOr("CAJETA_BENCH_CAJETA_VERSION", "PROFILE_CAJETA_VERSION");
         if (ver != null) {
             c.languageVersion = "" + ver;
+        } else {
+            c.languageVersion #= BenchConfig.detectCajetaVersion();
         }
         String fl = System.env.get("CAJETA_BENCH_FLAGS");
         if (fl != null) {
@@ -134,5 +141,27 @@ public class BenchConfig {
             return "" + this.vulkanDriver;
         }
         return "";
+    }
+
+    // The compiler version for language_version when CAJETA_BENCH_CAJETA_VERSION
+    // is unset: the runtime has no version API (cajeta 0.46.3), so this asks
+    // `cajeta --version` of the compiler on PATH. That is the compiler a
+    // `cajeta bench` task ran under, which is the one that built the binary;
+    // a binary run by hand with another cajeta first on PATH records that
+    // one, and with none on PATH the column stays "".
+    public static #String detectCajetaVersion() {
+        String out #= Sys.run1("cajeta", "--version");
+        return BenchConfig.parseCajetaVersion(out);
+    }
+
+    // `cajeta 0.46.3 (b5689bda)` → `0.46.3`; "" for anything else.
+    public static #String parseCajetaVersion(String text) {
+        if (text == null) {
+            return "";
+        }
+        if (!text.startsWith("cajeta ")) {
+            return "";
+        }
+        return Sys.tokenAfter(text, "cajeta ");
     }
 }

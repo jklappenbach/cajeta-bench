@@ -1,0 +1,23 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** A benchmark that declares an input size and a unit (0.1.2 throughput). */
+public class SizedBench extends Benchmark {
+    public int64 size;
+    public String unitName;
+
+    public SizedBench(int64 size, String unitName) {
+        this.size = size;
+        this.unitName = "" + unitName;
+    }
+
+    public String name() { return "sized"; }
+    public String area() { return "test/sized"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 3; }
+    public int64 inputSize() { return this.size; }
+    public String unit() { return this.unitName; }
+    public String library() { return "dev.cajeta.ml"; }
+    public String libraryVersion() { return "0.10.6"; }
+}

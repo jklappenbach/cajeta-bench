@@ -12,7 +12,7 @@ library the way `dev.cajeta.unit` is the test library
 // your bench project's cajeta.json
 "settings": {
     "capabilities": ["filesystem", "clock", "env", "process"],
-    "dependencies": { "dev.cajeta.bench": "0.1.1" },
+    "dependencies": { "dev.cajeta.bench": "0.1.2" },
     "build": { "entry-method": "my.bench.Main::main" }
 },
 "tasks": {
@@ -60,6 +60,8 @@ public class HashMapIntBench extends Benchmark {
 | `--run` | measure and write `results.csv` and `env.csv` beside it |
 | `--area <path>` | select a catalog path, or a prefix of one (`collection` selects `collection/*`) |
 | `--bench <name>` | select one benchmark by `name()` |
+| `--variant <label>` | select one variant label of the selected benchmarks |
+| `--verbose` | with `--list`: every variant, the backend it runs on, and skip reasons |
 | `--out <path>` | results CSV (default `results.csv`); `<dir>/results.csv` puts env at `<dir>/env.csv`. A missing directory is created; one that cannot be (a file in the way) is exit 2 before anything is measured, naming the path |
 
 Exit status is 0 when every row is `ok` or `skipped`, 1 when any row `failed` or
@@ -72,7 +74,7 @@ benchmark never stops the run.
 | `CAJETA_BENCH_SMOKE=1` | warmup 1, trials 3, every row's notes tagged `smoke` (never published) |
 | `CAJETA_BENCH_MACHINE` | the `machine` column; default the hostname, lowercased |
 | `CAJETA_BENCH_RUN_ID` | the `run_id` column (`PROFILE_RUN_ID` still honored) |
-| `CAJETA_BENCH_CAJETA_VERSION` | `language_version` of cajeta rows (`PROFILE_CAJETA_VERSION` still honored) |
+| `CAJETA_BENCH_CAJETA_VERSION` | `language_version` of cajeta rows (`PROFILE_CAJETA_VERSION` still honored). Unset: `cajeta --version` of the compiler on PATH (the runtime has no version API), which under `cajeta bench` is the compiler that built the binary; empty when none is on PATH |
 | `CAJETA_BENCH_FLAGS` | the `flags` column of cajeta rows; default `--release -O3 -march=native` |
 
 ## The contract
@@ -91,6 +93,14 @@ New in v2:
 | `competitorNote()` | `""` | appended to `notes` |
 | `platform()` | `"cajeta"` | `platform` (`cajeta-llm 0.9.0 hip`, `llama.cpp b6123 cuda`) |
 | `model()` | `""` | `model` (`Llama-3.1-8B Q4_K_M sha256:…`) |
+| `library()`, `libraryVersion()` | `""` | `library`, `library_version` (`dev.cajeta.ml`, `0.10.6`) |
+| `backendFor(variant)` | `backend()` | `backend` and `driver` of that variant's row; decides interleaving |
+| `skipReasonFor(variant)` | `skipReason()` | `notes` of that variant's skipped row |
+
+`throughput` is filled when `inputSize()` is not -1: `inputSize / median
+seconds`, three decimals, labelled `unit()`. So give `inputSize()` in the
+unit's numerator (items for `items/s`, MB for `MB/s`). `timestamp_unix` is the
+wall-clock second each row was made.
 
 `os` and `driver` are detected, not declared: `os` is `Ubuntu 26.04`,
 `Ubuntu 24.04 (WSL2)` or `Windows 11 (10.0.26100.4652)`; `driver` is

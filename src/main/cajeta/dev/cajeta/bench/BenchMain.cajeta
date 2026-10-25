@@ -2,6 +2,7 @@ package dev.cajeta.bench;
 
 import cajeta.collection.ArrayList;
 import cajeta.io.file.Path;
+import cajeta.lang.StringBuilder;
 
 import dev.cajeta.bench.Benchmark;
 import dev.cajeta.bench.BenchConfig;
@@ -23,6 +24,8 @@ import dev.cajeta.bench.report.Result;
 //   --area <path>      select by catalog path: `collection/hashmap`, or a
 //                      prefix of it (`collection` selects collection/*)
 //   --bench <name>     select one benchmark by name()
+//   --variant <label>  select one variant label of the selected benchmarks
+//   --verbose          with --list: every variant, its backend, skip reasons
 //   --out <path>       results CSV (default results.csv); env.csv is written
 //                      beside it (`<dir>/results.csv` → `<dir>/env.csv`).
 //                      A missing directory is created; one that cannot be
@@ -42,6 +45,8 @@ public final class BenchMain {
         String outPath = "results.csv";
         String areaFilter = null;
         String benchFilter = null;
+        String variantFilter = null;
+        boolean verbose = false;
         int32 i = 0;
         int32 argc = (int32) args.count();
         while (i < argc) {
@@ -50,10 +55,13 @@ public final class BenchMain {
                 listMode = true;
             } else if (a.equals("--run")) {
                 runMode = true;
+            } else if (a.equals("--verbose") || a.equals("-v")) {
+                verbose = true;
             } else if (a.equals("--help") || a.equals("-h")) {
                 BenchMain.usage();
                 return 0;
-            } else if (a.equals("--out") || a.equals("--area") || a.equals("--bench")) {
+            } else if (a.equals("--out") || a.equals("--area") || a.equals("--bench")
+                       || a.equals("--variant")) {
                 if (i + 1 >= argc) {
                     System.stdout.println("bench: " + a + " needs a value");
                     BenchMain.usage();
@@ -64,6 +72,8 @@ public final class BenchMain {
                     outPath = v;
                 } else if (a.equals("--area")) {
                     areaFilter = v;
+                } else if (a.equals("--variant")) {
+                    variantFilter = v;
                 } else {
                     benchFilter = v;
                 }
@@ -77,17 +87,17 @@ public final class BenchMain {
         }
 
         if (listMode) {
-            return BenchMain.list(benchmarks, areaFilter, benchFilter);
+            return BenchMain.list(benchmarks, areaFilter, benchFilter, variantFilter, verbose);
         }
         if (runMode) {
-            return BenchMain.runMeasured(benchmarks, outPath, areaFilter, benchFilter);
+            return BenchMain.runMeasured(benchmarks, outPath, areaFilter, benchFilter, variantFilter);
         }
         BenchMain.usage();
         return 2;
     }
 
     public static void usage() {
-        System.stdout.println("usage: <bench> --list | --run [--area <path>] [--bench <name>] [--out <results.csv>]");
+        System.stdout.println("usage: <bench> --list [--verbose] | --run [--area <path>] [--bench <name>] [--variant <label>] [--out <results.csv>]");
         System.stdout.println("  env: CAJETA_BENCH_SMOKE=1 (warmup 1, trials 3, rows tagged smoke),");
         System.stdout.println("       CAJETA_BENCH_MACHINE, CAJETA_BENCH_RUN_ID, CAJETA_BENCH_CAJETA_VERSION,");
         System.stdout.println("       CAJETA_BENCH_FLAGS");
@@ -114,27 +124,28 @@ public final class BenchMain {
         return true;
     }
 
-    public static int32 list(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter) {
-        int32 n = benchmarks.count();
-        int32 k = 0;
-        while (k < n) {
-            Benchmark b = benchmarks.get(k);
-            if (BenchMain.selected(b, areaFilter, benchFilter)) {
-                System.stdout.println("  " + b.area() + "/" + b.name() + "  [" + b.backend() + "]");
-            }
-            k = k + 1;
+    public static int32 list(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter,
+                             String variantFilter, boolean verbose) {
+        String text #= BenchMain.listing(benchmarks, areaFilter, benchFilter, variantFilter, verbose);
+        int32 n = (int32) text.count();
+        if (n > 0) {
+            // println adds the final newline back.
+            System.stdout.println(text.substring(0, n - 1));
         }
         return 0;
     }
 
     public static int32 runMeasured(ArrayList<Benchmark> benchmarks, String outPath,
-                                    String areaFilter, String benchFilter) {
+                                    String areaFilter, String benchFilter, String variantFilter) {
         String why #= BenchMain.prepareOut(outPath);
         if (!why.isEmpty()) {
             System.stdout.println(why);
             return 2;
         }
         BenchConfig cfg #= BenchConfig.fromEnv();
+        if (variantFilter != null) {
+            cfg.variantFilter = "" + variantFilter;
+        }
         if (cfg.smoke) {
             System.stdout.println("bench: SMOKE run (warmup 1, trials 3); rows are tagged smoke and never published");
         }
@@ -178,7 +189,7 @@ public final class BenchMain {
         }
         System.stdout.println("bench: wrote " + outPath + " (" + rn + " rows) and " + envPath);
 
-        if (picked == 0) {
+        if (picked == 0 || rn == 0) {
             System.stdout.println("bench: the selection matched no benchmark");
             return 1;
         }
@@ -224,5 +235,52 @@ public final class BenchMain {
             return "bench: cannot write " + outPath + ": creating " + dir + " failed";
         }
         return "";
+    }
+
+    // The --list text. Plain: one `area/name  [backend]` line per selected
+    // benchmark. Verbose: the benchmark, then one line per variant with the
+    // backend it runs on and, for an unsupported one, its skip reason. With a
+    // variant filter only benchmarks carrying that label, and only that
+    // variant, are shown. Calls variants() without setup().
+    public static #String listing(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter,
+                                  String variantFilter, boolean verbose) {
+        StringBuilder sb = heap StringBuilder();
+        int32 n = benchmarks.count();
+        int32 k = 0;
+        while (k < n) {
+            Benchmark b = benchmarks.get(k);
+            boolean keep = BenchMain.selected(b, areaFilter, benchFilter);
+            if (keep && variantFilter != null) {
+                keep = Harness.hasVariant(b, variantFilter);
+            }
+            if (keep) {
+                if (!verbose) {
+                    sb.append("  " + b.area() + "/" + b.name() + "  [" + b.backend() + "]\n");
+                } else {
+                    sb.append("  " + b.area() + "/" + b.name() + "\n");
+                    ArrayList<String> vs #= b.variants();
+                    int32 vi = 0;
+                    int32 vn = vs.count();
+                    while (vi < vn) {
+                        String v = vs.get(vi);
+                        if (variantFilter == null || v.equals(variantFilter)) {
+                            String label = "" + v;
+                            if (label.isEmpty()) {
+                                label = "(no variant)";
+                            }
+                            String line #= "      " + label + " [" + b.backendFor(v) + "]";
+                            if (!b.supportsVariant(v)) {
+                                line #= line + " skipped: " + b.skipReasonFor(v);
+                            }
+                            sb.append(line);
+                            sb.append("\n");
+                        }
+                        vi = vi + 1;
+                    }
+                }
+            }
+            k = k + 1;
+        }
+        return sb.toString();
     }
 }

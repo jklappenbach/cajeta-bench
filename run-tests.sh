@@ -11,7 +11,8 @@
 # pins it to `bench-test-machine` so HarnessTests can assert the column is
 # filled from the environment (plan 1.1.1). CAJETA_BENCH_SMOKE is cleared so a
 # caller's smoke setting cannot leak into the trial-count assertions; the
-# smoke path is tested through BenchConfig directly.
+# smoke path is tested through BenchConfig directly. CAJETA_BENCH_CAJETA_VERSION
+# is cleared too, so the `cajeta --version` default is what gets tested.
 #
 # cajeta-unit resolution, in order (the cajeta-logging shape):
 #   1. $UNIT_CJA        — explicit archive path, used verbatim
@@ -156,6 +157,15 @@ echo ">> compiling the test binary"
     -o "$out/benchtests" \
     dev.cajeta.bench.test.TestMain.run "$here/src/test/cajeta" "$out/build" >/dev/null
 
+# The harness defaults language_version to `cajeta --version` of the compiler
+# on PATH; put the one that built this suite first and tell the test what it
+# says, so RowFieldTests can pin the default exactly.
+cajeta_path="$(command -v "$CAJETA")"
+expect_ver="$("$cajeta_path" --version | sed -n 's/^cajeta \([^ ]*\).*/\1/p' | head -1)"
+
 echo ">> running"
-( cd "$out" && env -u CAJETA_BENCH_SMOKE CAJETA_BENCH_MACHINE=bench-test-machine \
+( cd "$out" && env -u CAJETA_BENCH_SMOKE -u CAJETA_BENCH_CAJETA_VERSION -u PROFILE_CAJETA_VERSION \
+    PATH="$(dirname "$cajeta_path"):$PATH" \
+    CAJETA_BENCH_MACHINE=bench-test-machine \
+    BENCH_TEST_EXPECT_CAJETA_VERSION="$expect_ver" \
     BENCH_TEST_TMP="$out" ./benchtests )
