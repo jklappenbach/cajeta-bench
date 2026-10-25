@@ -1,0 +1,92 @@
+package dev.cajeta.bench;
+
+import dev.cajeta.bench.Benchmark;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+// One variant's measured trials, shared by the plain and the interleaved
+// paths: the per-trial time after the baseline, or what the trial reported
+// (reportedNanos), its reported throughput and latency stats, and how many
+// trials the baseline swallowed.
+public class Trials {
+    public int64[] samples;
+    public float64[] tps;
+    public int64[] smin;
+    public int64[] smed;
+    public int64[] smean;
+    public int64[] sp95;
+    public int32 n;
+    public int32 ntp;
+    public int32 nstats;
+    public int32 reported;
+    public int32 baselineHits;
+    public String tpUnit;
+
+    public Trials(int32 trials) {
+        this.samples = heap int64[trials];
+        this.tps = heap float64[trials];
+        this.smin = heap int64[trials];
+        this.smed = heap int64[trials];
+        this.smean = heap int64[trials];
+        this.sp95 = heap int64[trials];
+        this.n = 0;
+        this.ntp = 0;
+        this.nstats = 0;
+        this.reported = 0;
+        this.baselineHits = 0;
+        this.tpUnit = "";
+    }
+
+    // One trial: `raw` is its wall-clock time; reads what b reported during it.
+    public void addTrial(Benchmark b, int64 raw, int64 baseline) {
+        int64 dur = raw - baseline;
+        if (b.reportedNsSet) {
+            dur = b.reportedNs;
+            this.reported = this.reported + 1;
+        } else if (baseline > 0 && dur <= 0) {
+            this.baselineHits = this.baselineHits + 1;
+        }
+        if (dur < 0) {
+            dur = 0;
+        }
+        this.samples[this.n] = dur;
+        this.n = this.n + 1;
+        if (b.reportedTpSet) {
+            this.tps[this.ntp] = b.reportedTp;
+            this.ntp = this.ntp + 1;
+            this.tpUnit = "" + b.reportedTpUnit;
+        }
+        if (b.rsSet) {
+            this.smin[this.nstats] = b.rsMin;
+            this.smed[this.nstats] = b.rsMedian;
+            this.smean[this.nstats] = b.rsMean;
+            this.sp95[this.nstats] = b.rsP95;
+            this.nstats = this.nstats + 1;
+        }
+    }
+
+    // The time and throughput columns of `r`; returns the notes tags
+    // (`reported`, `reported-stats`, `baseline>=measured`), "; "-joined.
+    public #String fill(Result r) {
+        Harness.fillStats(r, this.samples, this.n);
+        String tags #= Harness.reportedTag(this.reported, this.n);
+        if (this.nstats > 0) {
+            r.minNs = Trials.medianOf(this.smin, this.nstats);
+            r.medianNs = Trials.medianOf(this.smed, this.nstats);
+            r.meanNs = Trials.medianOf(this.smean, this.nstats);
+            r.p95Ns = Trials.medianOf(this.sp95, this.nstats);
+            tags #= Harness.join(tags, "reported-stats");
+        }
+        Harness.fillThroughput(r);
+        Harness.fillReportedThroughput(r, this.tps, this.ntp, this.tpUnit);
+        if (this.baselineHits > 0) {
+            tags #= Harness.join(tags, "baseline>=measured");
+        }
+        return tags;
+    }
+
+    public static int64 medianOf(int64[] a, int32 n) {
+        Harness.sortInPlace(a, n);
+        return a[n / 2];
+    }
+}

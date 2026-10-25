@@ -73,7 +73,9 @@ public class Benchmark {
         return (int64) -1;
     }
 
-    // Whether this benchmark can run in the current environment. A dataset-backed
+    // Whether this benchmark can run in the current environment. Read after
+    // prepare(variant), so it may answer per variant from prepared state; when
+    // setup() throws and this is false, the row is skipped rather than failed. A dataset-backed
     // benchmark returns false when its corpus isn't configured/fetched, so the
     // harness records a skipped row instead of crashing on a missing file.
     public boolean available() {
@@ -276,6 +278,7 @@ public class Benchmark {
 
     // Called by the harness before every warmup and trial.
     public void clearReported() {
+        this.rsSet = false;
         this.reportedNs = (int64) -1;
         this.reportedNsSet = false;
         this.reportedTp = 0.0;
@@ -343,5 +346,56 @@ public class Benchmark {
     // Called after each measured variant, whether it succeeded or threw: the
     // place to stop what prepare(variant) started.
     public void finishVariant(String variant) {
+    }
+
+    // ---- 0.1.5 -------------------------------------------------------------
+
+    // A load generator's own latency figures for this trial, in ns: the row's
+    // min/median/mean/p95 become the median over trials of each (notes say
+    // `reported-stats`). Call it in every trial, or once in the trial set.
+    public int64 rsMin;
+    public int64 rsMedian;
+    public int64 rsMean;
+    public int64 rsP95;
+    public boolean rsSet;
+
+    public void reportedStats(int64 min, int64 median, int64 mean, int64 p95) {
+        this.rsMin = min;
+        this.rsMedian = median;
+        this.rsMean = mean;
+        this.rsP95 = p95;
+        this.rsSet = true;
+    }
+
+    // A key,value line for env.csv (a toolchain version, a load generator's
+    // flags). Call it from setup(); the last value for a key wins.
+    public ArrayList<String> envKeys;
+    public ArrayList<String> envValues;
+
+    public void envExtra(String key, String value) {
+        if (this.envKeys == null) {
+            this.envKeys = heap ArrayList<String>();
+            this.envValues = heap ArrayList<String>();
+        }
+        String k = "" + key;
+        String v = "" + value;
+        this.envKeys.add(#k);
+        this.envValues.add(#v);
+    }
+
+    // True while the harness runs warmups, false in trials (and in the untimed
+    // allocation-count run after them): lets a benchmark shorten a load
+    // generator's warm-up.
+    public boolean warmupNow;
+
+    public boolean isWarmup() {
+        return this.warmupNow;
+    }
+
+    // A baselineNanos() at or above a trial's measured time clamps that trial
+    // to 0, notes say `baseline>=measured`, and the row is `invalid` unless
+    // this returns true.
+    public boolean allowZeroAfterBaseline() {
+        return false;
     }
 }

@@ -1,0 +1,21 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** 0.1.5: records toolchain facts for env.csv during setup. */
+public class EnvBench extends Benchmark {
+    public EnvBench() {
+        return;
+    }
+
+    public String name() { return "env"; }
+    public String area() { return "test/env"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 3; }
+
+    public void setup() {
+        this.envExtra("toolchain_oha", "1.4.5");
+        this.envExtra("oha_flags", "-w, --no-tui");
+        this.envExtra("toolchain_oha", "1.4.6");
+    }
+}

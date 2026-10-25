@@ -12,7 +12,7 @@ library the way `dev.cajeta.unit` is the test library
 // your bench project's cajeta.json
 "settings": {
     "capabilities": ["filesystem", "clock", "env", "process"],
-    "dependencies": { "dev.cajeta.bench": "0.1.4" },
+    "dependencies": { "dev.cajeta.bench": "0.1.5" },
     "build": { "entry-method": "my.bench.Main::main" }
 },
 "tasks": {
@@ -75,6 +75,7 @@ benchmark never stops the run.
 | `CAJETA_BENCH_MACHINE` | the `machine` column; default the hostname, lowercased |
 | `CAJETA_BENCH_RUN_ID` | the `run_id` column (`PROFILE_RUN_ID` still honored) |
 | `CAJETA_BENCH_CAJETA_VERSION` | `language_version` of cajeta rows (`PROFILE_CAJETA_VERSION` still honored). Unset: `cajeta --version` of the compiler on PATH (the runtime has no version API), which under `cajeta bench` is the compiler that built the binary; empty when none is on PATH |
+| `CAJETA_BENCH_NO_GPU=1` | run no driver probe (nvidia-smi, hipconfig, vulkaninfo): `driver` stays empty and non-cpu rows' notes say `driver: not probed`. Without it a probe runs once per driver family, only for a measured non-cpu row, never for a cpu, skipped or failed one |
 | `CAJETA_BENCH_FLAGS` | the `flags` column of cajeta rows; default `--release -O3 -march=native` |
 
 ## The contract
@@ -112,7 +113,31 @@ benchmarks; `--variant` selects by key.
 replaces that trial's wall-clock time and `notes` say `reported`. It may call
 `reportedThroughput(value, unit)` (a load generator's req/s): the row's
 throughput is the median reported value with that unit, in preference to the
-`inputSize()` derivation. Both are cleared before every warmup and trial.
+`inputSize()` derivation. It may call `reportedStats(min, median, mean, p95)`
+(a load generator's own latency percentiles, ns): the row's four time columns
+become the median over trials of each, and `notes` say `reported-stats`; once
+in the trial set is enough. All three are cleared before every warmup and
+trial. `isWarmup()` is true during warmups (to shorten a load generator's own
+warm-up), false in trials and in the untimed allocation-count run.
+
+**Order per variant.** `supportsVariant(v)`, then `prepare(v)`, then
+`available()` and the interleave decision, so both may read what `prepare` set.
+An unavailable variant is a skipped row with `unavailableReason()`; a
+benchmark whose `setup()` throws while `available()` is false is skipped, not
+failed.
+
+**Baselines.** A `baselineNanos()` at or above a trial's measured time clamps
+that trial to 0, writes `baseline>=measured` in `notes`, and makes the row
+`invalid` unless `allowZeroAfterBaseline()` returns true.
+
+**env.csv extras.** `envExtra(key, value)`, called from `setup()`, adds a line
+to `env.csv` (the last value for a key wins): toolchain versions, a load
+generator's flags.
+
+**Ports.** `Ports.free(n)` returns `n` distinct free TCP ports above the
+kernel's ephemeral range (`Ports.ephemeralRange()`, from
+`/proc/sys/net/ipv4/ip_local_port_range`, default 32768-60999), where a load
+generator's client sockets cannot take them; successive calls walk forward.
 
 `throughput` is filled when `inputSize()` is not -1: `inputSize / median
 seconds`, three decimals, labelled `unit()`. So give `inputSize()` in the
@@ -182,6 +207,8 @@ phase once per warmup and trial, and stops it.
   row (the service is stopped); the log's last line is in `notes`.
 - `relaunchEachTrial(true)` starts and stops the service in every trial; with
   no phase command the trial's time is exec to ready (`reported`).
+- `readyPollMillis(ms)` sets the readiness loop's wait between probes
+  (default 5).
 - `CAJETA_BENCH_TRACE=1` prints each step (start, ready, phase, stop).
 
 Readiness uses `cajeta.io.net`, so the library declares the `network`
@@ -222,7 +249,11 @@ or the one-liner it documents:
 (header shape, per-row version and status, and on v2 a machine and platform on
 every row), then the benchmark-fidelity outcomes for whichever of their
 benchmarks the file holds. `--require-suite` makes an absent one a failure,
-`--no-smoke` rejects smoke rows.
+`--no-smoke` rejects smoke rows. The absolute checks (the matmul band, the
+SIMD ceilings) are keyed by the row's `machine` in the script's `CEILINGS`
+table; a machine without a table is skipped, and v1 rows (no machine column)
+read Proton's. Phoenix's ceilings are provisional, 2x the 2026-10-25 smoke
+medians. The relative and structural checks are machine-independent.
 
 ## Develop
 

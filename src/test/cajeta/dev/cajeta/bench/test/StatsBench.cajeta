@@ -1,0 +1,49 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/**
+ * 0.1.5: maps a load generator's own latency percentiles onto the time
+ * columns. Records isWarmup() on every call (W / T) and, with a baseline,
+ * exercises the baseline>=measured rule.
+ */
+public class StatsBench extends Benchmark {
+    public int32 calls;
+    public boolean everyTrial;
+    public String phases;
+    public int64 baseline;
+    public boolean allowZero;
+
+    public StatsBench(boolean everyTrial) {
+        this.calls = 0;
+        this.everyTrial = everyTrial;
+        this.phases = "";
+        this.baseline = (int64) 0;
+        this.allowZero = false;
+    }
+
+    public String name() { return "stats"; }
+    public String area() { return "test/stats"; }
+    public int32 warmupIters() { return 2; }
+    public int32 measuredIters() { return 3; }
+    public int64 baselineNanos() { return this.baseline; }
+    public boolean allowZeroAfterBaseline() { return this.allowZero; }
+
+    public void run(int32 iterations) {
+        if (this.isWarmup()) {
+            this.phases = this.phases + "W";
+            this.reportedStats((int64) 1, (int64) 1, (int64) 1, (int64) 1);   // discarded
+            return;
+        }
+        this.phases = this.phases + "T";
+        int32 k = this.calls;
+        this.calls = this.calls + 1;
+        if (this.everyTrial) {
+            if (k == 0) { this.reportedStats((int64) 10, (int64) 20, (int64) 25, (int64) 40); }
+            if (k == 1) { this.reportedStats((int64) 30, (int64) 60, (int64) 70, (int64) 90); }
+            if (k == 2) { this.reportedStats((int64) 20, (int64) 40, (int64) 45, (int64) 60); }
+        } else if (k == 2) {
+            this.reportedStats((int64) 7, (int64) 8, (int64) 9, (int64) 11);
+        }
+    }
+}

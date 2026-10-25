@@ -1,0 +1,59 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.bench.Benchmark;
+
+/**
+ * 0.1.5: decides availability and interleaving from what prepare(variant)
+ * set: `a` alone, `b` interleaved against a competitor, `c` unavailable.
+ */
+public class PreparedBench extends Benchmark {
+    public String current;
+    public String prepared;
+    public boolean throwInSetup;
+
+    public PreparedBench(boolean throwInSetup) {
+        this.current = "";
+        this.prepared = "";
+        this.throwInSetup = throwInSetup;
+    }
+
+    public String name() { return "prepared"; }
+    public String area() { return "xpu/prepared"; }
+    public String backend() { return "cuda"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 3; }
+
+    public #ArrayList<String> variants() {
+        ArrayList<String> v = heap ArrayList<String>();
+        v.add("a");
+        v.add("b");
+        v.add("c");
+        return v;
+    }
+
+    public void setup() {
+        if (this.throwInSetup) {
+            throw heap Exception("no device");
+        }
+    }
+
+    public void prepare(String variant) {
+        this.current = "" + variant;
+        this.prepared = this.prepared + variant;
+    }
+
+    public boolean available() {
+        if (this.throwInSetup) {
+            return false;
+        }
+        return !this.current.equals("c");
+    }
+
+    public String unavailableReason() {
+        return "variant " + this.current + " needs a second device";
+    }
+
+    public boolean hasCompetitor() { return this.current.equals("b"); }
+    public String competitorLanguage() { return "cuda-c++"; }
+}

@@ -6,6 +6,8 @@ import dev.cajeta.bench.Benchmark;
 import dev.cajeta.bench.BenchConfig;
 import dev.cajeta.bench.report.Result;
 import dev.cajeta.bench.report.Memory;
+import dev.cajeta.bench.Trials;
+import dev.cajeta.bench.detect.DriverDetect;
 
 // The measurement loop (profile spec §4, benchmark-reference spec §3). Runs a
 // benchmark through idiomatic warmup then N measured trials, timing each with
@@ -48,20 +50,24 @@ public class Harness {
                 return;
             }
         }
-        if (!b.available()) {
-            String why = b.unavailableReason();
-            rows.add(Harness.skippedRow(b, cfg, "", why));
-            return;
-        }
         boolean setupOk = true;
+        String setupMsg = "";
         try {
             b.setup();
         } catch (Throwable e) {
             setupOk = false;
-            String msg #= Harness.messageOf(e);
-            rows.add(Harness.failedRow(b, cfg, "", "setup threw: " + msg));
+            setupMsg #= Harness.messageOf(e);
         }
+        Harness.collectEnv(b, cfg);
         if (!setupOk) {
+            // A benchmark that says it cannot run here is skipped, not failed,
+            // even when its setup threw for that reason.
+            if (!b.available()) {
+                String why = b.unavailableReason();
+                rows.add(Harness.skippedRow(b, cfg, "", why));
+            } else {
+                rows.add(Harness.failedRow(b, cfg, "", "setup threw: " + setupMsg));
+            }
             return;
         }
         ArrayList<String> vs #= b.variants();
@@ -73,11 +79,17 @@ public class Harness {
                 // not selected
             } else if (b.supportsVariant(v)) {
                 try {
-                    if (Harness.interleaves(b, v)) {
-                        Harness.measureInterleavedInto(b, cfg, v, rows);
+                    // prepare first: available() and the interleave decision
+                    // may read what prepare(variant) set.
+                    b.prepare(v);
+                    if (!b.available()) {
+                        String why = b.unavailableReason();
+                        rows.add(Harness.skippedRow(b, cfg, v, why));
+                    } else if (Harness.interleaves(b, v)) {
+                        Harness.measureInterleavedPrepared(b, cfg, v, rows);
                     } else {
                         // Owned temporary straight into the list.
-                        rows.add(Harness.measureOne(b, cfg, v));
+                        rows.add(Harness.measurePrepared(b, cfg, v));
                     }
                 } catch (Throwable e) {
                     String msg #= Harness.messageOf(e);
@@ -89,6 +101,7 @@ public class Harness {
                     String fmsg #= Harness.messageOf(e);
                     System.stdout.println("bench: " + b.name() + " finishVariant(" + v + ") threw: " + fmsg);
                 }
+                Harness.collectEnv(b, cfg);
             } else {
                 String why = b.skipReasonFor(v);
                 rows.add(Harness.skippedRow(b, cfg, v, why));
@@ -100,6 +113,42 @@ public class Harness {
         } catch (Throwable e) {
             String msg #= Harness.messageOf(e);
             System.stdout.println("bench: " + b.name() + " teardown threw: " + msg);
+        }
+        Harness.collectEnv(b, cfg);
+    }
+
+    // Move b's envExtra lines into the run's env.csv extras.
+    public static void collectEnv(Benchmark b, BenchConfig cfg) {
+        if (b.envKeys == null) {
+            return;
+        }
+        int32 i = 0;
+        while (i < b.envKeys.count()) {
+            String k = b.envKeys.get(i);
+            String v = b.envValues.get(i);
+            cfg.addEnv(k, v);
+            i = i + 1;
+        }
+        b.envKeys = null;
+        b.envValues = null;
+    }
+
+    // "a; b" of the non-empty parts.
+    public static #String join(String a, String b) {
+        if (a.isEmpty()) {
+            return "" + b;
+        }
+        if (b.isEmpty()) {
+            return "" + a;
+        }
+        return a + "; " + b;
+    }
+
+    // baseline>=measured: the row is invalid unless the benchmark allows it.
+    public static void applyBaseline(Benchmark b, Result r, Trials tr) {
+        if (tr.baselineHits > 0 && !b.allowZeroAfterBaseline()) {
+            r.checkOk = false;
+            r.status = "invalid";
         }
     }
 
@@ -209,66 +258,54 @@ public class Harness {
         return t;
     }
 
+    // prepare(variant), then measurePrepared.
     public static #Result measureOne(Benchmark b, BenchConfig cfg, String variant) {
         b.prepare(variant);
+        return Harness.measurePrepared(b, cfg, variant);
+    }
 
+    public static #Result measurePrepared(Benchmark b, BenchConfig cfg, String variant) {
         int32 warm = Harness.warmupFor(b, cfg);
         int32 trials = Harness.trialsFor(b, cfg);
         int64 baseline = b.baselineNanos();
 
         // Warmup — reach steady state before measuring.
+        b.warmupNow = true;
         int32 w = 0;
         while (w < warm) {
             b.clearReported();
             b.runVariant(variant, 1);
             w = w + 1;
         }
+        b.warmupNow = false;
 
         // Pre-workload resident baseline (overhead-subtraction reference).
         int64 baseRss = Memory.currentRssKb();
 
         // Measured trials.
-        int64[] samples = heap int64[trials];
-        float64[] tps = heap float64[trials];
-        int32 ntp = 0;
-        String tpUnit = "";
-        int32 reported = 0;
+        Trials tr = heap Trials(trials);
         int32 t = 0;
         while (t < trials) {
             b.clearReported();
             int64 t0 = cfg.clock.nanoTime();
             b.runVariant(variant, 1);
             int64 t1 = cfg.clock.nanoTime();
-            int64 dur = t1 - t0 - baseline;
-            if (dur < 0) {
-                dur = 0;
-            }
-            if (b.reportedNsSet) {
-                dur = b.reportedNs;
-                reported = reported + 1;
-            }
-            if (b.reportedTpSet) {
-                tps[ntp] = b.reportedTp;
-                ntp = ntp + 1;
-                tpUnit = "" + b.reportedTpUnit;
-            }
-            samples[t] = dur;
+            tr.addTrial(b, t1 - t0, baseline);
             t = t + 1;
         }
 
         int64 peak = Memory.peakRssKb();
         boolean ok = b.checkResult();
 
-        Result r #= Harness.baseRow(b, cfg, variant);
+        Result r #= Harness.baseRow(b, cfg, variant, true);
         r.inputSize = b.inputSize();
         r.warmup = warm;
         r.trials = trials;
-        Harness.fillStats(r, samples, trials);
-        Harness.fillThroughput(r);
-        Harness.fillReportedThroughput(r, tps, ntp, tpUnit);
+        String tags #= tr.fill(r);
         Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, ok);
-        String lead #= Harness.leadFor(b, Harness.reportedTag(reported, trials));
+        Harness.applyBaseline(b, r, tr);
+        String lead #= Harness.leadFor(b, tags);
         r.notes #= Harness.notesFor(b, cfg, variant, lead);
         return r;
     }
@@ -280,11 +317,16 @@ public class Harness {
     public static void measureInterleavedInto(Benchmark b, BenchConfig cfg, String variant,
                                               ArrayList<Result> rows) {
         b.prepare(variant);
+        Harness.measureInterleavedPrepared(b, cfg, variant, rows);
+    }
 
+    public static void measureInterleavedPrepared(Benchmark b, BenchConfig cfg, String variant,
+                                                  ArrayList<Result> rows) {
         int32 warm = Harness.warmupFor(b, cfg);
         int32 trials = Harness.trialsFor(b, cfg);
         int64 baseline = b.baselineNanos();
 
+        b.warmupNow = true;
         int32 w = 0;
         while (w < warm) {
             b.clearReported();
@@ -292,35 +334,19 @@ public class Harness {
             b.runCompetitor(variant, 1);
             w = w + 1;
         }
+        b.warmupNow = false;
 
         int64 baseRss = Memory.currentRssKb();
 
-        int64[] ours = heap int64[trials];
+        Trials tr = heap Trials(trials);
         int64[] comp = heap int64[trials];
-        float64[] tps = heap float64[trials];
-        int32 ntp = 0;
-        String tpUnit = "";
-        int32 reported = 0;
         int32 t = 0;
         while (t < trials) {
             b.clearReported();
             int64 t0 = cfg.clock.nanoTime();
             b.runVariant(variant, 1);
             int64 t1 = cfg.clock.nanoTime();
-            int64 d = t1 - t0 - baseline;
-            if (d < 0) {
-                d = 0;
-            }
-            if (b.reportedNsSet) {
-                d = b.reportedNs;
-                reported = reported + 1;
-            }
-            if (b.reportedTpSet) {
-                tps[ntp] = b.reportedTp;
-                ntp = ntp + 1;
-                tpUnit = "" + b.reportedTpUnit;
-            }
-            ours[t] = d;
+            tr.addTrial(b, t1 - t0, baseline);
 
             int64 t2 = cfg.clock.nanoTime();
             b.runCompetitor(variant, 1);
@@ -337,20 +363,15 @@ public class Harness {
         boolean okOurs = b.checkResult();
         boolean okComp = b.checkCompetitor();
 
-        Result r #= Harness.baseRow(b, cfg, variant);
+        Result r #= Harness.baseRow(b, cfg, variant, true);
         r.inputSize = b.inputSize();
         r.warmup = warm;
         r.trials = trials;
-        Harness.fillStats(r, ours, trials);
-        Harness.fillThroughput(r);
-        Harness.fillReportedThroughput(r, tps, ntp, tpUnit);
+        String tags #= tr.fill(r);
         Harness.fillMemory(b, variant, r, peak, baseRss);
         Harness.markChecked(r, okOurs);
-        String rtag #= Harness.reportedTag(reported, trials);
-        String lead0 = "interleaved";
-        if (!rtag.isEmpty()) {
-            lead0 = "interleaved; " + rtag;
-        }
+        Harness.applyBaseline(b, r, tr);
+        String lead0 #= Harness.join("interleaved", tags);
         String lead #= Harness.leadFor(b, lead0);
         r.notes #= Harness.notesFor(b, cfg, variant, lead);
         rows.add(#r);
@@ -358,7 +379,7 @@ public class Harness {
         String cl = b.competitorLanguage();
         String cp = b.competitorPlatform();
         String cv = b.competitorVersion();
-        Result c #= Harness.baseRow(b, cfg, variant);
+        Result c #= Harness.baseRow(b, cfg, variant, true);
         c.language = "" + cl;
         c.platform = "" + cp;
         c.languageVersion = "" + cv;
@@ -453,7 +474,9 @@ public class Harness {
     }
 
     // The identity columns every row of `b` carries, whatever its status.
-    public static #Result baseRow(Benchmark b, BenchConfig cfg, String variant) {
+    // `probe`: a measured row may run the driver probe (once per family); a
+    // skipped or failed row only takes what is already known.
+    public static #Result baseRow(Benchmark b, BenchConfig cfg, String variant, boolean probe) {
         // Materialize names into locals first (reading a class-param's method
         // result inline into a field has bitten us before — bind, then store).
         String nm = b.name();
@@ -463,7 +486,12 @@ public class Harness {
         String mach = b.machine();
         String un = b.unit();
         String mo = b.model();
-        String drv #= cfg.driverFor(be);
+        String drv = "";
+        if (probe) {
+            drv #= cfg.driverFor(be);
+        } else {
+            drv #= cfg.knownDriver(be);
+        }
         String lang = b.languageFor(variant);
         String lv = b.languageVersionFor(variant);
         String pl = b.platformFor(variant);
@@ -524,6 +552,13 @@ public class Harness {
                 s = s + "; " + note;
             }
         }
+        if (cfg.noGpu) {
+            String be = b.backendFor(variant);
+            String fam #= DriverDetect.family(be);
+            if (!fam.isEmpty()) {
+                s #= Harness.join(s, "driver: not probed");
+            }
+        }
         if (cfg.smoke) {
             if (s.isEmpty()) {
                 s = "smoke";
@@ -537,7 +572,7 @@ public class Harness {
     // A recorded skip row (never a silent omission) for a benchmark or
     // variant that can't run here.
     public static #Result skippedRow(Benchmark b, BenchConfig cfg, String variant, String reason) {
-        Result r #= Harness.baseRow(b, cfg, variant);
+        Result r #= Harness.baseRow(b, cfg, variant, false);
         r.status = "skipped";
         r.checkOk = false;
         r.notes #= Harness.notesFor(b, cfg, variant, reason);
@@ -546,7 +581,7 @@ public class Harness {
 
     // A recorded failure: the benchmark threw. `message` lands in notes.
     public static #Result failedRow(Benchmark b, BenchConfig cfg, String variant, String message) {
-        Result r #= Harness.baseRow(b, cfg, variant);
+        Result r #= Harness.baseRow(b, cfg, variant, false);
         r.status = "failed";
         r.checkOk = false;
         r.notes #= Harness.notesFor(b, cfg, variant, message);

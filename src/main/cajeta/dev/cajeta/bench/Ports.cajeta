@@ -1,0 +1,114 @@
+package dev.cajeta.bench;
+
+import cajeta.io.net.IpAddress;
+import cajeta.io.net.SocketAddress;
+import cajeta.io.net.TcpListener;
+
+import dev.cajeta.bench.detect.Sys;
+
+// Free TCP ports for services under test, above the kernel's ephemeral range,
+// where a load generator's own client sockets can never take them.
+//
+//   int32[] p #= Ports.free(2);       // two distinct ports, each bindable now
+//   int32[] r #= Ports.ephemeralRange();   // {32768, 60999} on stock Linux
+//
+// A port is free when a listener can bind 127.0.0.1:port; the listener is
+// closed at once, so a port handed out can still be lost to a race, which is
+// why each call walks forward from where the last one stopped instead of
+// handing the same low port to every benchmark in the run.
+public final class Ports {
+
+    static int32 cursor = 0;
+
+    // {low, high} from `low<whitespace>high`; {32768, 60999} when unreadable.
+    public static #int32[] parseRange(String text) {
+        int32[] r = heap int32[2];
+        r[0] = 32768;
+        r[1] = 60999;
+        if (text == null) {
+            return r;
+        }
+        int32 n = text.byteLength();
+        int32[] got = heap int32[2];
+        int32 k = 0;
+        int32 val = 0;
+        boolean inNum = false;
+        int32 i = 0;
+        while (i <= n && k < 2) {
+            int8 c = 32;
+            if (i < n) {
+                c = text.byteAt(i);
+            }
+            if (c >= 48 && c <= 57) {
+                val = val * 10 + (int32) (c - 48);
+                inNum = true;
+            } else {
+                if (inNum) {
+                    got[k] = val;
+                    k = k + 1;
+                }
+                val = 0;
+                inNum = false;
+            }
+            i = i + 1;
+        }
+        if (k == 2 && got[0] > 0 && got[0] < got[1] && got[1] <= 65535) {
+            r[0] = got[0];
+            r[1] = got[1];
+        }
+        return r;
+    }
+
+    // The kernel's ephemeral port range (Linux /proc; the default elsewhere).
+    public static #int32[] ephemeralRange() {
+        String text #= Sys.readText("/proc/sys/net/ipv4/ip_local_port_range");
+        return Ports.parseRange(text);
+    }
+
+    // `count` distinct free ports above the ephemeral range; throws when the
+    // space above it has fewer free.
+    public static #int32[] free(int32 count) {
+        int32[] range #= Ports.ephemeralRange();
+        int32 low = range[1] + 1;
+        int32[] out = heap int32[count];
+        int32 found = 0;
+        int32 p = Ports.cursor;
+        if (p < low || p > 65535) {
+            p = low;
+        }
+        int32 tried = 0;
+        int32 span = 65535 - low + 1;
+        while (found < count && tried < span) {
+            if (Ports.isFree(p)) {
+                out[found] = p;
+                found = found + 1;
+            }
+            p = p + 1;
+            if (p > 65535) {
+                p = low;
+            }
+            tried = tried + 1;
+        }
+        Ports.cursor = p;
+        if (found < count) {
+            throw heap Exception("Ports.free: only " + found + " of " + count
+                + " ports free above the ephemeral range (" + low + "-65535)");
+        }
+        return out;
+    }
+
+    // True when a listener can bind 127.0.0.1:port right now.
+    public static boolean isFree(int32 port) {
+        boolean ok = false;
+        try {
+            IpAddress ip #= IpAddress.loopbackV4();
+            SocketAddress a #= SocketAddress.of(#ip, port);
+            TcpListener l #= TcpListener.bind(a);
+            ok = l.fd >= 0;
+            l.close();
+        } catch (Throwable e) {
+            ok = false;
+        }
+        return ok;
+    }
+}

@@ -167,7 +167,7 @@ cajeta_path="$(command -v "$CAJETA")"
 expect_ver="$("$cajeta_path" --version | sed -n 's/^cajeta \([^ ]*\).*/\1/p' | head -1)"
 
 echo ">> running"
-( cd "$out" && env -u CAJETA_BENCH_SMOKE -u CAJETA_BENCH_CAJETA_VERSION -u PROFILE_CAJETA_VERSION \
+( cd "$out" && env -u CAJETA_BENCH_SMOKE -u CAJETA_BENCH_NO_GPU -u CAJETA_BENCH_CAJETA_VERSION -u PROFILE_CAJETA_VERSION \
     PATH="$(dirname "$cajeta_path"):$PATH" \
     CAJETA_BENCH_MACHINE=bench-test-machine \
     BENCH_TEST_EXPECT_CAJETA_VERSION="$expect_ver" \

@@ -45,6 +45,16 @@ expect 1 "$fx/v2-alloc-missing.csv"
 expect 0 "$fx/v2-quoted-fields.csv"
 expect 0 --no-smoke "$fx/v2-quoted-fields.csv"
 
+# 0.1.5: absolute ceilings are keyed by machine (relative checks are not).
+# Phoenix's smoke medians pass on Phoenix's table and fail on Proton's; a
+# machine with no table skips the absolute checks; v1 (no machine column)
+# reads the Proton table the ceilings were set on.
+expect 0 "$fx/v2-phoenix-smoke.csv"
+expect 1 "$fx/v2-proton-slow.csv"
+expect 0 "$fx/v2-unknown-machine.csv"
+expect 1 "$fx/v2-phoenix-too-slow.csv"
+expect 0 "$fx/v1-32.csv"
+
 # tools/csv-column.py: the CSV-aware reader smoke scripts use instead of
 # `awk -F,` (0.1.3 quotes free-text fields, so a comma splits nothing).
 col() { python3 "$here/csv-column.py" "$@"; }

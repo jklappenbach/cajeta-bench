@@ -64,6 +64,13 @@ public class Report {
         w.writeString("cajeta_version," + Csv.field(cfg.languageVersion) + "\n");
         w.writeString("flags," + Csv.field(cfg.flags) + "\n");
         w.writeString("smoke," + Csv.boolStr(cfg.smoke) + "\n");
+        int32 i = 0;
+        while (i < cfg.envKeys.count()) {
+            String k = cfg.envKeys.get(i);
+            String v = cfg.envValues.get(i);
+            w.writeString(Csv.field(k) + "," + Csv.field(v) + "\n");
+            i = i + 1;
+        }
         w.flush();
         w.close();
         return true;

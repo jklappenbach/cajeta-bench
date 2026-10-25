@@ -1,0 +1,254 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import cajeta.io.net.IpAddress;
+import cajeta.io.net.SocketAddress;
+import cajeta.io.net.TcpListener;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.Ports;
+import dev.cajeta.bench.report.Report;
+import dev.cajeta.bench.report.Result;
+
+/** 0.1.5: GPU probing, reported stats, env extras, ports, warmup flag, prepare-first decisions, baselines. */
+public class Release015Tests {
+
+    public Release015Tests() {
+        return;
+    }
+
+    static #BenchConfig scripted() {
+        int64[] s = heap int64[6];
+        s[0] = 0;   s[1] = 10;
+        s[2] = 100; s[3] = 130;
+        s[4] = 200; s[5] = 220;
+        FakeClock fc = heap FakeClock(#s);
+        BenchConfig cfg = heap BenchConfig();
+        cfg.useClock(#fc);
+        return cfg;
+    }
+
+    // ---- (1) driver probing --------------------------------------------------
+
+    @Test
+    public void noGpuMeansNoProbeAnEmptyDriverAndANote() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.noGpu = true;
+        DeviceBench b = heap DeviceBench("cuda", false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(0).driver).isEqualTo("");
+        Assert.that(rows.get(0).notes).contains("driver: not probed");
+        Assert.that((int64) cfg.probes).isEqualTo(0);
+        return;
+    }
+
+    @Test
+    public void cpuRowsAndSkippedRowsNeverProbe() {
+        BenchConfig cfg = heap BenchConfig();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        CountingBench c = heap CountingBench();
+        Harness.measureInto(c, cfg, rows);
+        Assert.that((int64) cfg.probes).isEqualTo(0);
+        Assert.isFalse(rows.get(0).notes.contains("not probed"));
+        // MixedBackendBench: host (cpu), cuda (measured), vulkan (skipped).
+        cfg.setDriver("cuda", "NVIDIA 610.88 CUDA 13.3");
+        MixedBackendBench m = heap MixedBackendBench();
+        Harness.measureInto(m, cfg, rows);
+        Assert.that((int64) cfg.probes).isEqualTo(0);
+        Assert.that(rows.get(3).status).isEqualTo("skipped");
+        Assert.that(rows.get(3).driver).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void theNoGpuEnvironmentIsRead() {
+        // run-tests.sh clears CAJETA_BENCH_NO_GPU.
+        BenchConfig cfg #= BenchConfig.fromEnv();
+        Assert.isFalse(cfg.noGpu);
+        return;
+    }
+
+    // ---- (2) reportedStats -----------------------------------------------------
+
+    @Test
+    public void reportedStatsMapOntoTheTimeColumnsAsMediansOverTrials() {
+        BenchConfig cfg #= Release015Tests.scripted();
+        StatsBench b = heap StatsBench(true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.minNs).isEqualTo(20);
+        Assert.that(r.medianNs).isEqualTo(40);
+        Assert.that(r.meanNs).isEqualTo(45);
+        Assert.that(r.p95Ns).isEqualTo(60);
+        Assert.that(r.notes).contains("reported-stats");
+        return;
+    }
+
+    @Test
+    public void reportedStatsOnceForTheTrialSetIsTaken() {
+        BenchConfig cfg #= Release015Tests.scripted();
+        StatsBench b = heap StatsBench(false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.minNs).isEqualTo(7);
+        Assert.that(r.medianNs).isEqualTo(8);
+        Assert.that(r.meanNs).isEqualTo(9);
+        Assert.that(r.p95Ns).isEqualTo(11);
+        return;
+    }
+
+    // ---- (3) envExtra ----------------------------------------------------------
+
+    @Test
+    public void envExtrasFromSetupReachEnvCsvLastWriteWins() {
+        BenchConfig cfg = heap BenchConfig();
+        EnvBench b = heap EnvBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        String path #= TestFiles.scratch("env-extra.csv");
+        Report.writeEnv(path, cfg);
+        String text #= TestFiles.read(path);
+        Assert.that(text).contains("\ntoolchain_oha,1.4.6\n");
+        Assert.isFalse(text.contains("1.4.5"));
+        Assert.that(text).contains("\noha_flags,\"-w, --no-tui\"\n");
+        return;
+    }
+
+    // ---- (4) Ports ---------------------------------------------------------------
+
+    @Test
+    public void theEphemeralRangeIsParsedAndRead() {
+        int32[] r #= Ports.parseRange("32768\t60999\n");
+        Assert.that((int64) r[0]).isEqualTo(32768);
+        Assert.that((int64) r[1]).isEqualTo(60999);
+        int32[] d #= Ports.parseRange("garbage");
+        Assert.that((int64) d[0]).isEqualTo(32768);
+        Assert.that((int64) d[1]).isEqualTo(60999);
+        int32[] live #= Ports.ephemeralRange();
+        Assert.that((int64) live[0]).isLessThan((int64) live[1]);
+        return;
+    }
+
+    @Test
+    public void freePortsAreAboveTheRangeDistinctAndBindable() {
+        int32[] range #= Ports.ephemeralRange();
+        int32[] p #= Ports.free(3);
+        Assert.that((int64) p.count()).isEqualTo(3);
+        Assert.that((int64) p[0]).isGreaterThan((int64) range[1]);
+        Assert.isTrue(p[0] != p[1] && p[1] != p[2] && p[0] != p[2]);
+        Assert.isTrue(Ports.isFree(p[0]));
+        int32[] q #= Ports.free(1);
+        Assert.isTrue(q[0] != p[0] && q[0] != p[1] && q[0] != p[2]);
+        // A port held by a listener is not free.
+        IpAddress ip #= IpAddress.loopbackV4();
+        SocketAddress a #= SocketAddress.of(#ip, p[1]);
+        TcpListener held #= TcpListener.bind(a);
+        Assert.isFalse(Ports.isFree(p[1]));
+        held.close();
+        Assert.isTrue(Ports.isFree(p[1]));
+        return;
+    }
+
+    // ---- (5) isWarmup ----------------------------------------------------------
+
+    @Test
+    public void isWarmupIsTrueOnlyDuringWarmups() {
+        BenchConfig cfg #= Release015Tests.scripted();
+        StatsBench b = heap StatsBench(true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        // two warmups, three trials, then the untimed allocation-count run
+        Assert.that(b.phases).isEqualTo("WWTTTT");
+        return;
+    }
+
+    // ---- (7) prepare first ------------------------------------------------------
+
+    @Test
+    public void availabilityAndInterleavingAreDecidedAfterPrepare() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.setDriver("cuda", "NVIDIA 610.88 CUDA 13.3");
+        PreparedBench b = heap PreparedBench(false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(b.prepared).isEqualTo("abc");
+        Assert.that((int64) rows.count()).isEqualTo(4);
+        Assert.that(rows.get(0).variant).isEqualTo("a");
+        Assert.isFalse(rows.get(0).notes.contains("interleaved"));
+        Assert.that(rows.get(1).variant).isEqualTo("b");
+        Assert.that(rows.get(1).notes).contains("interleaved");
+        Assert.that(rows.get(2).language).isEqualTo("cuda-c++");
+        Assert.that(rows.get(3).variant).isEqualTo("c");
+        Assert.that(rows.get(3).status).isEqualTo("skipped");
+        Assert.that(rows.get(3).notes).isEqualTo("variant c needs a second device");
+        return;
+    }
+
+    @Test
+    public void anUnavailableBenchmarkWhoseSetupThrowsIsSkippedNotFailed() {
+        BenchConfig cfg = heap BenchConfig();
+        PreparedBench b = heap PreparedBench(true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(1);
+        Assert.that(rows.get(0).status).isEqualTo("skipped");
+        Assert.that(rows.get(0).notes).contains("needs a second device");
+        return;
+    }
+
+    // ---- (8) baseline >= measured -----------------------------------------------
+
+    @Test
+    public void aBaselineSwallowingTheTrialIsInvalidAndSaysSo() {
+        BenchConfig cfg #= Release015Tests.scripted();
+        StatsBench b = heap StatsBench(false);
+        b.everyTrial = false;
+        b.baseline = (int64) 25;
+        // wall-clock 10, 30, 20 minus 25 -> 0, 5, 0 (and no reported stats
+        // until the third trial, so read the wall-clock path: drop them)
+        b.calls = 99;
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.status).isEqualTo("invalid");
+        Assert.isFalse(r.checkOk);
+        Assert.that(r.notes).contains("baseline>=measured");
+        Assert.that(r.minNs).isEqualTo(0);
+        Assert.that(r.p95Ns).isEqualTo(5);
+        return;
+    }
+
+    @Test
+    public void allowZeroAfterBaselineKeepsTheRowOkButStillNotes() {
+        BenchConfig cfg #= Release015Tests.scripted();
+        StatsBench b = heap StatsBench(false);
+        b.baseline = (int64) 25;
+        b.allowZero = true;
+        b.calls = 99;
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.that(r.notes).contains("baseline>=measured");
+        return;
+    }
+
+    @Test
+    public void aBaselineBelowEveryTrialLeavesNoNote() {
+        BenchConfig cfg #= Release015Tests.scripted();
+        StatsBench b = heap StatsBench(false);
+        b.baseline = (int64) 5;
+        b.calls = 99;
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.isFalse(r.notes.contains("baseline"));
+        Assert.that(r.minNs).isEqualTo(5);
+        return;
+    }
+}

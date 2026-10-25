@@ -76,6 +76,7 @@ public class ServiceBenchmark extends ExternalBenchmark {
     public int64 stopTimeoutMs;
     public int32 sampleMs;
     public boolean relaunch;
+    public int32 readyPollMs;
 
     public boolean trace;
     public Process svc;
@@ -99,6 +100,7 @@ public class ServiceBenchmark extends ExternalBenchmark {
         this.stopTimeoutMs = (int64) 5000;
         this.sampleMs = 50;
         this.relaunch = false;
+        this.readyPollMs = 5;
         this.trace = System.env.get("CAJETA_BENCH_TRACE") != null;
         this.svc = null;
         this.lastServicePid = -1;
@@ -152,6 +154,15 @@ public class ServiceBenchmark extends ExternalBenchmark {
             ms = 1;
         }
         this.sampleMs = ms;
+    }
+
+    // How long the readiness loop waits on the service between probes
+    // (default 5 ms).
+    public void readyPollMillis(int32 ms) {
+        if (ms < 1) {
+            ms = 1;
+        }
+        this.readyPollMs = ms;
     }
 
     public void relaunchEachTrial(boolean on) {
@@ -268,7 +279,8 @@ public class ServiceBenchmark extends ExternalBenchmark {
             if (this.isReady()) {
                 ready = true;
             } else {
-                ProcessResult w #= this.svc.waitMillis((int64) 5);
+                int64 pollMs = (int64) this.readyPollMs;   // a local: see stopService
+                ProcessResult w #= this.svc.waitMillis(pollMs);
                 if (!w.timedOut()) {
                     int32 code = w.exitCode();
                     this.svc.close();

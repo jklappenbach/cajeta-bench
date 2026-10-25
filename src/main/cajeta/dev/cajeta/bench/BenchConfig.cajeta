@@ -1,5 +1,7 @@
 package dev.cajeta.bench;
 
+import cajeta.collection.ArrayList;
+
 import dev.cajeta.bench.BenchClock;
 import dev.cajeta.bench.detect.OsDetect;
 import dev.cajeta.bench.detect.DriverDetect;
@@ -19,6 +21,7 @@ import dev.cajeta.bench.detect.Sys;
  *                                unset: `cajeta --version` on PATH
  *   CAJETA_BENCH_FLAGS           the flags column of cajeta rows
  *   CAJETA_BENCH_MACHINE         read per row by Benchmark.machine()
+ *   CAJETA_BENCH_NO_GPU          1/true: no driver probe; `driver: not probed`
  */
 public class BenchConfig {
     public boolean smoke;
@@ -29,6 +32,14 @@ public class BenchConfig {
     public BenchClock clock;
     // Measure only this variant label ("" = every variant). BenchMain --variant.
     public String variantFilter;
+    // CAJETA_BENCH_NO_GPU=1: no driver probe runs, `driver` stays empty, and
+    // non-cpu rows' notes say `driver: not probed`.
+    public boolean noGpu;
+    // How many driver probes (nvidia-smi, hipconfig, vulkaninfo) have run.
+    public int32 probes;
+    // env.csv extras collected from Benchmark.envExtra.
+    public ArrayList<String> envKeys;
+    public ArrayList<String> envValues;
 
     public String nvidiaDriver;
     public String rocmDriver;
@@ -47,6 +58,10 @@ public class BenchConfig {
         this.os = "";
         this.clock = heap BenchClock();
         this.variantFilter = "";
+        this.noGpu = false;
+        this.probes = 0;
+        this.envKeys = heap ArrayList<String>();
+        this.envValues = heap ArrayList<String>();
         this.nvidiaDriver = "";
         this.rocmDriver = "";
         this.vulkanDriver = "";
@@ -58,6 +73,7 @@ public class BenchConfig {
     public static #BenchConfig fromEnv() {
         BenchConfig c = heap BenchConfig();
         c.smoke = BenchConfig.parseSmoke(System.env.get("CAJETA_BENCH_SMOKE"));
+        c.noGpu = BenchConfig.parseSmoke(System.env.get("CAJETA_BENCH_NO_GPU"));
         String rid #= BenchConfig.envOr("CAJETA_BENCH_RUN_ID", "PROFILE_RUN_ID");
         if (rid != null) {
             c.runId = "" + rid;
@@ -116,11 +132,18 @@ public class BenchConfig {
         }
     }
 
-    /** The driver column for a row on `backend`: "" on cpu, detected once per family. */
+    /**
+     * The driver column for a MEASURED row on `backend`: "" on cpu and under
+     * noGpu (no probe runs), else detected once per family.
+     */
     public #String driverFor(String backend) {
+        if (this.noGpu) {
+            return "";
+        }
         String fam #= DriverDetect.family(backend);
         if (fam.equals("nvidia")) {
             if (!this.nvidiaKnown) {
+                this.probes = this.probes + 1;
                 this.nvidiaDriver #= DriverDetect.forBackend(backend);
                 this.nvidiaKnown = true;
             }
@@ -128,6 +151,7 @@ public class BenchConfig {
         }
         if (fam.equals("rocm")) {
             if (!this.rocmKnown) {
+                this.probes = this.probes + 1;
                 this.rocmDriver #= DriverDetect.forBackend(backend);
                 this.rocmKnown = true;
             }
@@ -135,12 +159,49 @@ public class BenchConfig {
         }
         if (fam.equals("vulkan")) {
             if (!this.vulkanKnown) {
+                this.probes = this.probes + 1;
                 this.vulkanDriver #= DriverDetect.forBackend(backend);
                 this.vulkanKnown = true;
             }
             return "" + this.vulkanDriver;
         }
         return "";
+    }
+
+    /** The driver for a skipped or failed row: what is already known, never a probe. */
+    public #String knownDriver(String backend) {
+        if (this.noGpu) {
+            return "";
+        }
+        String fam #= DriverDetect.family(backend);
+        if (fam.equals("nvidia") && this.nvidiaKnown) {
+            return "" + this.nvidiaDriver;
+        }
+        if (fam.equals("rocm") && this.rocmKnown) {
+            return "" + this.rocmDriver;
+        }
+        if (fam.equals("vulkan") && this.vulkanKnown) {
+            return "" + this.vulkanDriver;
+        }
+        return "";
+    }
+
+    /** Add or replace an env.csv extra (the last value for a key wins). */
+    public void addEnv(String key, String value) {
+        int32 i = 0;
+        while (i < this.envKeys.count()) {
+            String k = this.envKeys.get(i);
+            if (k.equals(key)) {
+                String v = "" + value;
+                this.envValues.set(i, #v);
+                return;
+            }
+            i = i + 1;
+        }
+        String nk = "" + key;
+        String nv = "" + value;
+        this.envKeys.add(#nk);
+        this.envValues.add(#nv);
     }
 
     // The compiler version for language_version when CAJETA_BENCH_CAJETA_VERSION

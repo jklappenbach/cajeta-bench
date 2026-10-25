@@ -47,6 +47,7 @@ public class ServiceTests {
         s.stopTimeoutMillis((int64) 3000);
         s.samplingMillis(20);
         s.iterations(0, 2);
+        Assert.that((int64) s.readyPollMs).isEqualTo(5);
         return s;
     }
 
@@ -82,6 +83,8 @@ public class ServiceTests {
         String[] argv #= ServiceTests.serverArgv(18742, "");
         s.service(#argv);
         s.readyOnPort(18742);
+        s.readyPollMillis(1);
+        Assert.that((int64) s.readyPollMs).isEqualTo(1);
         s.readyTimeoutMillis((int64) 15000);
         s.iterations(1, 3);
         Result r #= ExternalTests.measureAlone(s, cfg);
