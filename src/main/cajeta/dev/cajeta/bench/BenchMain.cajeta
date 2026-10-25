@@ -1,0 +1,175 @@
+package dev.cajeta.bench;
+
+import cajeta.collection.ArrayList;
+
+import dev.cajeta.bench.Benchmark;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Report;
+import dev.cajeta.bench.report.Result;
+
+// The bench command line every repo shares (spec §3.1), ported from the
+// samples/profile entry point. A consumer's entry point is three lines:
+//
+//   public static int32 main(String[] args) {
+//       ArrayList<Benchmark> b = heap ArrayList<Benchmark>();
+//       b.add(heap MyBench());
+//       return BenchMain.run(args, b);
+//   }
+//
+//   --list             print each benchmark as `area/name`, measure nothing
+//   --run              measure the selected benchmarks and write the CSVs
+//   --area <path>      select by catalog path: `collection/hashmap`, or a
+//                      prefix of it (`collection` selects collection/*)
+//   --bench <name>     select one benchmark by name()
+//   --out <path>       results CSV (default results.csv); env.csv is written
+//                      beside it (`<dir>/results.csv` → `<dir>/env.csv`)
+//   --help             this text
+//
+// Exit status: 0 when every measured row is ok or skipped; 1 when any row
+// failed or was invalid, or the selection matched nothing; 2 on a usage error.
+// The run itself never stops at a failing benchmark.
+public final class BenchMain {
+
+    public static int32 run(String[] args, ArrayList<Benchmark> benchmarks) {
+        boolean listMode = false;
+        boolean runMode = false;
+        String outPath = "results.csv";
+        String areaFilter = null;
+        String benchFilter = null;
+        int32 i = 0;
+        int32 argc = (int32) args.count();
+        while (i < argc) {
+            String a = args[i];
+            if (a.equals("--list")) {
+                listMode = true;
+            } else if (a.equals("--run")) {
+                runMode = true;
+            } else if (a.equals("--help") || a.equals("-h")) {
+                BenchMain.usage();
+                return 0;
+            } else if (a.equals("--out") || a.equals("--area") || a.equals("--bench")) {
+                if (i + 1 >= argc) {
+                    System.stdout.println("bench: " + a + " needs a value");
+                    BenchMain.usage();
+                    return 2;
+                }
+                String v = args[i + 1];
+                if (a.equals("--out")) {
+                    outPath = v;
+                } else if (a.equals("--area")) {
+                    areaFilter = v;
+                } else {
+                    benchFilter = v;
+                }
+                i = i + 1;
+            } else {
+                System.stdout.println("bench: unknown argument '" + a + "'");
+                BenchMain.usage();
+                return 2;
+            }
+            i = i + 1;
+        }
+
+        if (listMode) {
+            return BenchMain.list(benchmarks, areaFilter, benchFilter);
+        }
+        if (runMode) {
+            return BenchMain.runMeasured(benchmarks, outPath, areaFilter, benchFilter);
+        }
+        BenchMain.usage();
+        return 2;
+    }
+
+    public static void usage() {
+        System.stdout.println("usage: <bench> --list | --run [--area <path>] [--bench <name>] [--out <results.csv>]");
+        System.stdout.println("  env: CAJETA_BENCH_SMOKE=1 (warmup 1, trials 3, rows tagged smoke),");
+        System.stdout.println("       CAJETA_BENCH_MACHINE, CAJETA_BENCH_RUN_ID, CAJETA_BENCH_CAJETA_VERSION,");
+        System.stdout.println("       CAJETA_BENCH_FLAGS");
+    }
+
+    // Selection by --area (exact catalog path or a `/`-bounded prefix) and
+    // --bench (exact name). A null filter admits everything.
+    public static boolean selected(Benchmark b, String areaFilter, String benchFilter) {
+        if (areaFilter != null) {
+            String ar = b.area();
+            if (!ar.equals(areaFilter)) {
+                String prefix #= areaFilter + "/";
+                if (!ar.startsWith(prefix)) {
+                    return false;
+                }
+            }
+        }
+        if (benchFilter != null) {
+            String nm = b.name();
+            if (!nm.equals(benchFilter)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static int32 list(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter) {
+        int32 n = benchmarks.count();
+        int32 k = 0;
+        while (k < n) {
+            Benchmark b = benchmarks.get(k);
+            if (BenchMain.selected(b, areaFilter, benchFilter)) {
+                System.stdout.println("  " + b.area() + "/" + b.name() + "  [" + b.backend() + "]");
+            }
+            k = k + 1;
+        }
+        return 0;
+    }
+
+    public static int32 runMeasured(ArrayList<Benchmark> benchmarks, String outPath,
+                                    String areaFilter, String benchFilter) {
+        BenchConfig cfg #= BenchConfig.fromEnv();
+        if (cfg.smoke) {
+            System.stdout.println("bench: SMOKE run (warmup 1, trials 3); rows are tagged smoke and never published");
+        }
+
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        int32 picked = 0;
+        int32 i = 0;
+        int32 n = benchmarks.count();
+        while (i < n) {
+            Benchmark b = benchmarks.get(i);
+            if (BenchMain.selected(b, areaFilter, benchFilter)) {
+                Harness.measureInto(b, cfg, rows);
+                picked = picked + 1;
+            }
+            i = i + 1;
+        }
+
+        int32 bad = 0;
+        int32 k = 0;
+        int32 rn = rows.count();
+        while (k < rn) {
+            Result r = rows.get(k);
+            System.stdout.println("  " + r.status + "  " + r.area + "/" + r.benchmark
+                + " [" + r.language + "] variant='" + r.variant + "'  min_ns=" + r.minNs
+                + "  median_ns=" + r.medianNs + "  p95_ns=" + r.p95Ns);
+            if (r.status.equals("failed") || r.status.equals("invalid")) {
+                System.stdout.println("      " + r.notes);
+                bad = bad + 1;
+            }
+            k = k + 1;
+        }
+
+        Report.writeResults(outPath, rows);
+        String envPath #= Report.envPathFor(outPath);
+        Report.writeEnv(envPath, cfg);
+        System.stdout.println("bench: wrote " + outPath + " (" + rn + " rows) and " + envPath);
+
+        if (picked == 0) {
+            System.stdout.println("bench: the selection matched no benchmark");
+            return 1;
+        }
+        if (bad > 0) {
+            System.stdout.println("bench: " + bad + " row(s) failed or invalid");
+            return 1;
+        }
+        return 0;
+    }
+}

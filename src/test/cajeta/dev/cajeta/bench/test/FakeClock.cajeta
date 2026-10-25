@@ -1,0 +1,31 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.BenchClock;
+
+/**
+ * A scripted clock: each nanoTime() returns the next value of `script`, and
+ * past the end keeps returning the last one. Lets a test pin the exact
+ * duration of every measured trial.
+ */
+public class FakeClock extends BenchClock {
+    public int64[] script;
+    public int32 next;
+
+    public FakeClock(#int64[] script) {
+        this.script #= script;
+        this.next = 0;
+    }
+
+    public int64 nanoTime() {
+        int32 n = (int32) this.script.count();
+        if (n == 0) {
+            return (int64) 0;
+        }
+        if (this.next >= n) {
+            return this.script[n - 1];
+        }
+        int64 v = this.script[this.next];
+        this.next = this.next + 1;
+        return v;
+    }
+}

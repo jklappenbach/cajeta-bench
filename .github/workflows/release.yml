@@ -1,0 +1,28 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+# Builds + tests the library on a main push; on a v* tag also publishes a
+# GitHub Release and a signed publish to Olla. Logic lives in the reusable
+# workflow. No `pull_request:` trigger by design — changes land by pushing
+# straight to main, so a PR trigger would never fire.
+jobs:
+  release:
+    uses: jklappenbach/cajeta/.github/workflows/lib-release.yml@main
+    with:
+      # Pin explicitly; omitting this inherits the reusable workflow's default.
+      # 0.1.0 is authored and tested on v0.46.3.
+      cajeta-version: v0.46.3
+      # The cajeta-unit suite (run-tests.sh resolves dev.cajeta.unit itself:
+      # sibling checkout, else $OLLA_HOME, else a sha256-verified Olla fetch)
+      # and the verify-fidelity fixture tests.
+      test-command: ./scripts/ci-checks.sh
+    secrets: inherit

@@ -1,0 +1,47 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/** Plan 1.1.4: one row per variant; an unsupported variant is a skipped row. */
+public class VariantTests {
+
+    public VariantTests() {
+        return;
+    }
+
+    @Test
+    public void threeVariantsYieldThreeRows() {
+        BenchConfig cfg = heap BenchConfig();
+        VariantsBench b = heap VariantsBench(false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(3);
+        Assert.that(rows.get(0).variant).isEqualTo("small");
+        Assert.that(rows.get(1).variant).isEqualTo("medium");
+        Assert.that(rows.get(2).variant).isEqualTo("large");
+        Assert.that(rows.get(2).status).isEqualTo("ok");
+        Assert.that(b.prepared).isEqualTo("sml");
+        return;
+    }
+
+    @Test
+    public void anUnsupportedVariantIsASkippedRowWithItsReason() {
+        BenchConfig cfg = heap BenchConfig();
+        VariantsBench b = heap VariantsBench(true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(3);
+        Result s = rows.get(2);
+        Assert.that(s.variant).isEqualTo("large");
+        Assert.that(s.status).isEqualTo("skipped");
+        Assert.isFalse(s.checkOk);
+        Assert.that(s.notes).isEqualTo("large needs the 1 GB corpus");
+        Assert.that((int64) s.schemaVersion).isEqualTo(2);
+        Assert.that(b.prepared).isEqualTo("sm");
+        return;
+    }
+}

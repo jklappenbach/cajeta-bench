@@ -1,0 +1,50 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.Benchmark;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/** Plan 1.1.2 / spec 3.3.2: a throwing benchmark is a failed row, not a stop. */
+public class FailureTests {
+
+    public FailureTests() {
+        return;
+    }
+
+    @Test
+    public void aThrowingRunIsAFailedRowAndTheNextBenchmarkStillRuns() {
+        BenchConfig cfg = heap BenchConfig();
+        ArrayList<Benchmark> list = heap ArrayList<Benchmark>();
+        list.add(heap ThrowingBench());
+        list.add(heap CountingBench());
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureAll(list, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(2);
+        Result f = rows.get(0);
+        Assert.that(f.benchmark).isEqualTo("throwing");
+        Assert.that(f.status).isEqualTo("failed");
+        Assert.isFalse(f.checkOk);
+        Assert.that(f.notes).contains("kaboom in run");
+        Result ok = rows.get(1);
+        Assert.that(ok.benchmark).isEqualTo("counting");
+        Assert.that(ok.status).isEqualTo("ok");
+        return;
+    }
+
+    @Test
+    public void aThrowingSetupIsAFailedRow() {
+        BenchConfig cfg = heap BenchConfig();
+        SetupThrowingBench b = heap SetupThrowingBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(1);
+        Result f = rows.get(0);
+        Assert.that(f.status).isEqualTo("failed");
+        Assert.that(f.notes).contains("dataset missing");
+        Assert.that((int64) f.schemaVersion).isEqualTo(2);
+        return;
+    }
+}

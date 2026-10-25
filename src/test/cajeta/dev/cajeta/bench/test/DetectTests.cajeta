@@ -1,0 +1,136 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.detect.OsDetect;
+import dev.cajeta.bench.detect.DriverDetect;
+
+/**
+ * Plan 16.1.3: the `os` and `driver` columns, from recorded tool output.
+ * The parsers are pure; detect()/forBackend() only gather the text.
+ */
+public class DetectTests {
+
+    public DetectTests() {
+        return;
+    }
+
+    static #String ubuntu(String version, String pretty) {
+        return "PRETTY_NAME=\"" + pretty + "\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"" + version
+            + "\"\nVERSION=\"" + pretty + "\"\nID=ubuntu\nID_LIKE=debian\n";
+    }
+
+    @Test
+    public void ubuntuNative() {
+        String rel #= DetectTests.ubuntu("26.04", "Ubuntu 26.04 LTS");
+        String os #= OsDetect.fromLinux(rel,
+            "Linux version 6.17.0-5-generic (buildd@lcy02-amd64-001) (x86_64-linux-gnu-gcc-15) #5-Ubuntu SMP PREEMPT_DYNAMIC");
+        Assert.that(os).isEqualTo("Ubuntu 26.04");
+        return;
+    }
+
+    @Test
+    public void ubuntuUnderWsl2FromTheKernelString() {
+        String rel #= DetectTests.ubuntu("24.04", "Ubuntu 24.04.4 LTS");
+        String os #= OsDetect.fromLinux(rel,
+            "Linux version 6.6.87.2-microsoft-standard-WSL2 (root@439a258ad544) (gcc (GCC) 11.2.0, GNU ld (GNU Binutils) 2.37) #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025");
+        Assert.that(os).isEqualTo("Ubuntu 24.04 (WSL2)");
+        return;
+    }
+
+    @Test
+    public void anOsReleaseWithoutNameFallsBackToPrettyNameThenLinux() {
+        String os #= OsDetect.fromLinux("PRETTY_NAME=\"Arch Linux\"\nID=arch\n", "Linux version 6.9.1-arch1-1");
+        Assert.that(os).isEqualTo("Arch Linux");
+        String bare #= OsDetect.fromLinux("", "Linux version 6.9.1");
+        Assert.that(bare).isEqualTo("Linux");
+        return;
+    }
+
+    @Test
+    public void windows11FromVer() {
+        String os #= OsDetect.fromWindowsVer("\r\nMicrosoft Windows [Version 10.0.26100.4652]\r\n");
+        Assert.that(os).isEqualTo("Windows 11 (10.0.26100.4652)");
+        String w10 #= OsDetect.fromWindowsVer("Microsoft Windows [Version 10.0.19045.5737]");
+        Assert.that(w10).isEqualTo("Windows 10 (10.0.19045.5737)");
+        String none #= OsDetect.fromWindowsVer("");
+        Assert.that(none).isEqualTo("Windows");
+        return;
+    }
+
+    @Test
+    public void theLiveOsIsNamed() {
+        String os #= OsDetect.detect();
+        Assert.that(os).isNotEmpty();
+        return;
+    }
+
+    @Test
+    public void nvidiaDriverAndCudaFromNvidiaSmi() {
+        String smi = "Sun Oct 25 13:39:09 2026\n"
+            + "+-----------------------------------------------------------------------------------------+\n"
+            + "| NVIDIA-SMI 580.178.04             Driver Version: 610.88         CUDA Version: 13.3     |\n"
+            + "+-----------------------------------------+------------------------+----------------------+\n";
+        String d #= DriverDetect.fromNvidiaSmi(smi);
+        Assert.that(d).isEqualTo("NVIDIA 610.88 CUDA 13.3");
+        String none #= DriverDetect.fromNvidiaSmi("");
+        Assert.that(none).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void rocmFromTheVersionFileElseHipconfig() {
+        String a #= DriverDetect.fromRocm("6.4.1-120\n", "6.4.43483-a187df25c");
+        Assert.that(a).isEqualTo("ROCm 6.4.1-120");
+        String b #= DriverDetect.fromRocm("", "6.4.43483-a187df25c\n");
+        Assert.that(b).isEqualTo("ROCm HIP 6.4.43483-a187df25c");
+        String none #= DriverDetect.fromRocm("", "");
+        Assert.that(none).isEqualTo("");
+        return;
+    }
+
+    static #String vkDevice(String idx, String type, String name, String info) {
+        return "GPU" + idx + ":\n\tapiVersion         = 1.4.318\n\tdriverVersion      = 25.2.8\n"
+            + "\tdeviceType         = " + type + "\n\tdeviceName         = whatever\n"
+            + "\tdriverName         = " + name + "\n\tdriverInfo         = " + info + "\n";
+    }
+
+    @Test
+    public void vulkanPrefersARealGpuOverLlvmpipe() {
+        String cpu #= DetectTests.vkDevice("0", "PHYSICAL_DEVICE_TYPE_CPU", "llvmpipe",
+            "Mesa 25.2.8-0ubuntu0.24.04.2 (LLVM 20.1.2)");
+        String radv #= DetectTests.vkDevice("1", "PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU", "radv",
+            "Mesa 25.0.7-0ubuntu1");
+        String both #= "Devices:\n========\n" + cpu + radv;
+        String d #= DriverDetect.fromVulkanInfo(both);
+        Assert.that(d).isEqualTo("Vulkan radv Mesa 25.0.7-0ubuntu1");
+        String nv #= DetectTests.vkDevice("0", "PHYSICAL_DEVICE_TYPE_DISCRETE_GPU", "NVIDIA", "610.88");
+        String dn #= DriverDetect.fromVulkanInfo(nv);
+        Assert.that(dn).isEqualTo("Vulkan NVIDIA 610.88");
+        String only #= DriverDetect.fromVulkanInfo(cpu);
+        Assert.that(only).isEqualTo("Vulkan llvmpipe Mesa 25.2.8-0ubuntu0.24.04.2 (LLVM 20.1.2)");
+        String none #= DriverDetect.fromVulkanInfo("");
+        Assert.that(none).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void cpuAndUnknownBackendsHaveNoDriver() {
+        String c #= DriverDetect.forBackend("cpu");
+        Assert.that(c).isEqualTo("");
+        String u #= DriverDetect.forBackend("");
+        Assert.that(u).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void backendNamesMapToDriverFamilies() {
+        Assert.that(DriverDetect.family("cuda")).isEqualTo("nvidia");
+        Assert.that(DriverDetect.family("nvptx")).isEqualTo("nvidia");
+        Assert.that(DriverDetect.family("hip")).isEqualTo("rocm");
+        Assert.that(DriverDetect.family("amdgpu")).isEqualTo("rocm");
+        Assert.that(DriverDetect.family("vulkan")).isEqualTo("vulkan");
+        Assert.that(DriverDetect.family("spirv")).isEqualTo("vulkan");
+        Assert.that(DriverDetect.family("cpu")).isEqualTo("");
+        return;
+    }
+}

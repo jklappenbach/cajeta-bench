@@ -5,56 +5,78 @@ import cajeta.io.file.File;
 import cajeta.io.file.FileWriter;
 import cajeta.io.file.OpenMode;
 
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Machine;
+import dev.cajeta.bench.detect.Sys;
 import dev.cajeta.bench.report.Csv;
 import dev.cajeta.bench.report.Result;
 
-// Writes the report CSVs. `writeResults` emits the schema header + one row per
-// Result; `writeEnv` emits a small key,value env.csv capturing the run id plus
-// values the harness can read directly from the environment (System.env.get).
-// The richer hardware block (CPU model, kernel, GPU) is appended by the shell
-// driver, which has the process-exec the language doesn't.
+// Writes a run's two files (spec §4.1): results.csv (Csv.write) and env.csv,
+// a key,value record of what the harness itself can see. The richer hardware
+// block (governor, quiet-box evidence, competitor toolchains) is appended by
+// the shell driver (env-capture.sh).
 public class Report {
 
     public static void writeResults(String path, ArrayList<Result> rows) {
-        FileWriter w #= File.openWrite(path, OpenMode.WRITE);
-        w.writeString(Result.header());
-        w.writeString("\n");
-        int32 i = 0;
-        int32 n = rows.count();
-        while (i < n) {
-            Result r = rows.get(i);
-            w.writeString(r.toRow());
-            w.writeString("\n");
-            i = i + 1;
+        Csv.write(path, rows);
+    }
+
+    // env.csv sits beside results.csv: `<dir>/results.csv` → `<dir>/env.csv`;
+    // any other name `x` → `x.env.csv`.
+    public static #String envPathFor(String resultsPath) {
+        if (resultsPath.equals("results.csv")) {
+            return "env.csv";
         }
+        if (resultsPath.endsWith("/results.csv")) {
+            int32 n = (int32) resultsPath.count();
+            return resultsPath.substring(0, n - 11) + "env.csv";
+        }
+        return resultsPath + ".env.csv";
+    }
+
+    public static void writeEnv(String path, BenchConfig cfg) {
+        String machine #= Machine.resolve();
+        String kernel #= Sys.readText("/proc/sys/kernel/osrelease");
+        String kt #= kernel.trim();
+        String cpuinfo #= Sys.readText("/proc/cpuinfo");
+        String cpu #= Report.cpuModel(cpuinfo);
+        String ts = System.env.get("CAJETA_BENCH_RUN_TS");
+        if (ts == null) {
+            ts = System.env.get("PROFILE_RUN_TS");
+        }
+        if (ts == null) {
+            ts = "";
+        }
+
+        FileWriter w #= File.openWrite(path, OpenMode.WRITE);
+        w.writeString("key,value\n");
+        w.writeString("schema_version," + Result.SCHEMA_VERSION() + "\n");
+        w.writeString("run_id," + Csv.field(cfg.runId) + "\n");
+        w.writeString("timestamp_unix," + Csv.field(ts) + "\n");
+        w.writeString("machine," + Csv.field(machine) + "\n");
+        w.writeString("os," + Csv.field(cfg.os) + "\n");
+        w.writeString("kernel," + Csv.field(kt) + "\n");
+        w.writeString("cpu," + Csv.field(cpu) + "\n");
+        w.writeString("cajeta_version," + Csv.field(cfg.languageVersion) + "\n");
+        w.writeString("flags," + Csv.field(cfg.flags) + "\n");
+        w.writeString("smoke," + Csv.boolStr(cfg.smoke) + "\n");
         w.flush();
         w.close();
     }
 
-    public static void writeEnv(String path, String runId) {
-        FileWriter w #= File.openWrite(path, OpenMode.WRITE);
-        w.writeString("key,value\n");
-        w.writeString("run_id," + Csv.field(runId) + "\n");
-
-        String ts = System.env.get("PROFILE_RUN_TS");
-        if (ts == null) {
-            ts = "";
+    // `model name : AMD Ryzen 9 3950X 16-Core Processor` → the value.
+    public static #String cpuModel(String cpuinfo) {
+        int64 at = cpuinfo.indexOf("model name");
+        if (at < 0) {
+            return "";
         }
-        w.writeString("timestamp_unix," + Csv.field(ts) + "\n");
-
-        String cpu = System.env.get("PROFILE_CPU");
-        if (cpu == null) {
-            cpu = "";
+        int64 colon = cpuinfo.indexOfFrom(":", at);
+        if (colon < 0) {
+            return "";
         }
-        w.writeString("cpu," + Csv.field(cpu) + "\n");
-
-        String os = System.env.get("PROFILE_OS");
-        if (os == null) {
-            os = "";
-        }
-        w.writeString("os," + Csv.field(os) + "\n");
-
-        w.flush();
-        w.close();
+        int32 start = (int32) colon + 1;
+        int32 end = Sys.lineEnd(cpuinfo, start);
+        String raw #= cpuinfo.substring(start, end);
+        return raw.trim();
     }
 }

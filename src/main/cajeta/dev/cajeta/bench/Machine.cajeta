@@ -1,0 +1,55 @@
+package dev.cajeta.bench;
+
+import dev.cajeta.bench.detect.Sys;
+
+/**
+ * The `machine` column (spec §3.2): `CAJETA_BENCH_MACHINE` when set, else the
+ * hostname lowercased (so Phoenix's rows land under `results/phoenix/`), else
+ * `unknown`. A benchmark may override `Benchmark.machine()` instead.
+ */
+public final class Machine {
+
+    public static #String resolve() {
+        String env = System.env.get("CAJETA_BENCH_MACHINE");
+        String host #= Machine.hostname();
+        return Machine.fromSources(env, host);
+    }
+
+    public static #String fromSources(String envValue, String hostname) {
+        if (envValue != null) {
+            String t #= envValue.trim();
+            if (!t.isEmpty()) {
+                return t;
+            }
+        }
+        if (hostname == null) {
+            return "unknown";
+        }
+        String h #= hostname.trim();
+        if (h.isEmpty()) {
+            return "unknown";
+        }
+        return h.toLowerCase();
+    }
+
+    /** Linux /proc, then /etc/hostname, then COMPUTERNAME (Windows), HOSTNAME. */
+    public static #String hostname() {
+        String h #= Sys.readText("/proc/sys/kernel/hostname");
+        if (!h.isEmpty()) {
+            return h;
+        }
+        h #= Sys.readText("/etc/hostname");
+        if (!h.isEmpty()) {
+            return h;
+        }
+        String cn = System.env.get("COMPUTERNAME");
+        if (cn != null) {
+            return "" + cn;
+        }
+        String hn = System.env.get("HOSTNAME");
+        if (hn != null) {
+            return "" + hn;
+        }
+        return "";
+    }
+}

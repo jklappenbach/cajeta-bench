@@ -1,5 +1,12 @@
 package dev.cajeta.bench.report;
 
+import cajeta.collection.ArrayList;
+import cajeta.lang.StringBuilder;
+import cajeta.io.file.File;
+import cajeta.io.file.FileWriter;
+import cajeta.io.file.OpenMode;
+import dev.cajeta.bench.report.Result;
+
 // Minimal RFC-4180-ish CSV field escaping for the report writer. A field is
 // quoted only when it contains a comma, double-quote, CR or LF; inside a quoted
 // field, embedded double-quotes are doubled. Numbers and simple tokens pass
@@ -47,5 +54,31 @@ public class Csv {
             return "true";
         }
         return "false";
+    }
+
+    // The whole results CSV: the schema header, then one line per row, each
+    // line ending in "\n".
+    public static #String render(ArrayList<Result> rows) {
+        StringBuilder sb = heap StringBuilder();
+        sb.append(Result.header());
+        sb.append("\n");
+        int32 i = 0;
+        int32 n = rows.count();
+        while (i < n) {
+            Result r = rows.get(i);
+            sb.append(r.toRow());
+            sb.append("\n");
+            i = i + 1;
+        }
+        return sb.toString();
+    }
+
+    // Write render(rows) to `path`, replacing any file there.
+    public static void write(String path, ArrayList<Result> rows) {
+        String text #= Csv.render(rows);
+        FileWriter w #= File.openWrite(path, OpenMode.WRITE);
+        w.writeString(text);
+        w.flush();
+        w.close();
     }
 }

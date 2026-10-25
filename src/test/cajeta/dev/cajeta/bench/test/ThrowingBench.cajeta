@@ -1,0 +1,19 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** A benchmark whose measured body throws (plan 1.1.2). */
+public class ThrowingBench extends Benchmark {
+    public ThrowingBench() {
+        return;
+    }
+
+    public String name() { return "throwing"; }
+    public String area() { return "test/throwing"; }
+    public int32 warmupIters() { return 1; }
+    public int32 measuredIters() { return 3; }
+
+    public void run(int32 iterations) {
+        throw heap Exception("kaboom in run");
+    }
+}

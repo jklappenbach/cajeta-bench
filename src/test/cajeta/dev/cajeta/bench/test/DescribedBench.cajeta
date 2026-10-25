@@ -1,0 +1,20 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** Overrides every v2 identity hook, so each one is seen to reach the row. */
+public class DescribedBench extends Benchmark {
+    public DescribedBench() {
+        return;
+    }
+
+    public String name() { return "described"; }
+    public String area() { return "llm/decode"; }
+    public int32 warmupIters() { return 1; }
+    public int32 measuredIters() { return 3; }
+    public String machine() { return "proton"; }
+    public String unit() { return "tokens/s"; }
+    public String competitorNote() { return "llama.cpp b6123 built -DGGML_HIP=ON"; }
+    public String platform() { return "cajeta-llm 0.9.0 hip"; }
+    public String model() { return "Llama-3.1-8B Q4_K_M sha256:abc123"; }
+}

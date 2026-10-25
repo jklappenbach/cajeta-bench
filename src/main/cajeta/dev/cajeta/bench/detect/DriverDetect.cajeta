@@ -1,0 +1,141 @@
+package dev.cajeta.bench.detect;
+
+import dev.cajeta.bench.detect.Sys;
+import dev.cajeta.bench.detect.VulkanPick;
+
+/**
+ * The `driver` column: the device driver that ran a non-CPU row, as reported
+ * at run time (spec §3.2, §7.1). Empty for CPU rows.
+ *
+ *   nvidia  `NVIDIA 610.88 CUDA 13.3`       from `nvidia-smi`'s banner
+ *   rocm    `ROCm 6.4.1-120`                from $ROCM_PATH/.info/version
+ *           `ROCm HIP 6.4.43483-a187df25c`  else from `hipconfig --version`
+ *   vulkan  `Vulkan radv Mesa 25.0.7`       from `vulkaninfo --summary`
+ *
+ * All three tools are read-only queries. Under WSL2 nvidia-smi's "Driver
+ * Version" is the Windows host driver, which is the one that matters.
+ */
+public final class DriverDetect {
+
+    /** The driver family a backend name runs on: nvidia, rocm, vulkan or "". */
+    public static #String family(String backend) {
+        if (backend == null) {
+            return "";
+        }
+        String b #= backend.toLowerCase();
+        if (b.equals("cuda") || b.equals("nvptx") || b.equals("nvidia")) {
+            return "nvidia";
+        }
+        if (b.equals("hip") || b.equals("amdgpu") || b.equals("rocm")) {
+            return "rocm";
+        }
+        if (b.equals("vulkan") || b.equals("spirv") || b.equals("spir-v")) {
+            return "vulkan";
+        }
+        return "";
+    }
+
+    /** Detect the driver for `backend` now; "" for cpu or when not obtainable. */
+    public static #String forBackend(String backend) {
+        String fam #= DriverDetect.family(backend);
+        if (fam.equals("nvidia")) {
+            String smi #= Sys.run0("nvidia-smi");
+            return DriverDetect.fromNvidiaSmi(smi);
+        }
+        if (fam.equals("rocm")) {
+            String root = System.env.get("ROCM_PATH");
+            String file = "";
+            if (root != null) {
+                file #= Sys.readText(root + "/.info/version");
+            }
+            if (file.isEmpty()) {
+                file #= Sys.readText("/opt/rocm/.info/version");
+            }
+            String hip #= Sys.run1("hipconfig", "--version");
+            return DriverDetect.fromRocm(file, hip);
+        }
+        if (fam.equals("vulkan")) {
+            String vk #= Sys.run1("vulkaninfo", "--summary");
+            return DriverDetect.fromVulkanInfo(vk);
+        }
+        return "";
+    }
+
+    public static #String fromNvidiaSmi(String text) {
+        String d #= Sys.tokenAfter(text, "Driver Version:");
+        if (d.isEmpty()) {
+            return "";
+        }
+        String c #= Sys.tokenAfter(text, "CUDA Version:");
+        if (c.isEmpty()) {
+            return "NVIDIA " + d;
+        }
+        return "NVIDIA " + d + " CUDA " + c;
+    }
+
+    public static #String fromRocm(String versionFile, String hipconfig) {
+        String v #= Sys.firstLine(versionFile);
+        if (!v.isEmpty()) {
+            return "ROCm " + v;
+        }
+        String h #= Sys.firstLine(hipconfig);
+        if (!h.isEmpty()) {
+            return "ROCm HIP " + h;
+        }
+        return "";
+    }
+
+    public static #String fromVulkanInfo(String text) {
+        if (text == null) {
+            return "";
+        }
+        VulkanPick pick = heap VulkanPick();
+        String type = "";
+        String name = "";
+        String info = "";
+        int32 n = (int32) text.count();
+        int32 pos = 0;
+        while (pos < n) {
+            int32 end = Sys.lineEnd(text, pos);
+            String raw #= text.substring(pos, end);
+            String line #= raw.trim();
+            if (line.startsWith("GPU") && line.endsWith(":")) {
+                pick.offer(type, name, info);
+                type = "";
+                name = "";
+                info = "";
+            } else {
+                String k #= DriverDetect.keyOf(line);
+                if (k.equals("deviceType")) {
+                    type #= DriverDetect.valueOf(line);
+                } else if (k.equals("driverName")) {
+                    name #= DriverDetect.valueOf(line);
+                } else if (k.equals("driverInfo")) {
+                    info #= DriverDetect.valueOf(line);
+                }
+            }
+            pos = end + 1;
+        }
+        pick.offer(type, name, info);
+        return pick.describe();
+    }
+
+    /** `key` of a `key   = value` line, or "". */
+    public static #String keyOf(String line) {
+        int64 eq = line.indexOf("=");
+        if (eq < 0) {
+            return "";
+        }
+        String k #= line.substring(0, (int32) eq);
+        return k.trim();
+    }
+
+    public static #String valueOf(String line) {
+        int64 eq = line.indexOf("=");
+        if (eq < 0) {
+            return "";
+        }
+        String v #= line.substring((int32) eq + 1, (int32) line.count());
+        return v.trim();
+    }
+}

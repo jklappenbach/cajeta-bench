@@ -1,0 +1,38 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/**
+ * A device benchmark with a competitor (plan 14.1.3). Its `log` records the
+ * order the harness ran ours ("o") and the competitor ("c").
+ */
+public class DeviceBench extends Benchmark {
+    public String backendName;
+    public boolean withCompetitor;
+    public String log;
+
+    public DeviceBench(String backendName, boolean withCompetitor) {
+        this.backendName = "" + backendName;
+        this.withCompetitor = withCompetitor;
+        this.log = "";
+    }
+
+    public String name() { return "device-triad"; }
+    public String area() { return "xpu/babelstream"; }
+    public String backend() { return this.backendName; }
+    public int32 warmupIters() { return 1; }
+    public int32 measuredIters() { return 3; }
+
+    public void run(int32 iterations) {
+        this.log = this.log + "o";
+    }
+
+    public boolean hasCompetitor() { return this.withCompetitor; }
+    public String competitorLanguage() { return "cuda-c++"; }
+    public String competitorPlatform() { return "BabelStream 5.0 cuda"; }
+    public String competitorVersion() { return "12.6"; }
+
+    public void runCompetitor(String variant, int32 iterations) {
+        this.log = this.log + "c";
+    }
+}

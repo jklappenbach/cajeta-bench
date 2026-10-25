@@ -1,0 +1,46 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.bench.Benchmark;
+
+/**
+ * Three variants (plan 1.1.4). When `rejectLast` is set, the third is
+ * unsupported and must come back as a skipped row carrying skipReason().
+ */
+public class VariantsBench extends Benchmark {
+    public boolean rejectLast;
+    public String prepared;
+
+    public VariantsBench(boolean rejectLast) {
+        this.rejectLast = rejectLast;
+        this.prepared = "";
+    }
+
+    public String name() { return "variants"; }
+    public String area() { return "test/variants"; }
+    public int32 warmupIters() { return 1; }
+    public int32 measuredIters() { return 3; }
+
+    public #ArrayList<String> variants() {
+        ArrayList<String> v = heap ArrayList<String>();
+        v.add("small");
+        v.add("medium");
+        v.add("large");
+        return v;
+    }
+
+    public void prepare(String variant) {
+        this.prepared = this.prepared + variant.substring(0, 1);
+    }
+
+    public boolean supportsVariant(String variant) {
+        if (this.rejectLast && variant.equals("large")) {
+            return false;
+        }
+        return true;
+    }
+
+    public String skipReason() {
+        return "large needs the 1 GB corpus";
+    }
+}

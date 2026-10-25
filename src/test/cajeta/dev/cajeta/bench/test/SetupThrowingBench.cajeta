@@ -1,0 +1,17 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** A benchmark whose setup throws before any variant is measured. */
+public class SetupThrowingBench extends Benchmark {
+    public SetupThrowingBench() {
+        return;
+    }
+
+    public String name() { return "setup-throwing"; }
+    public String area() { return "test/throwing"; }
+
+    public void setup() {
+        throw heap Exception("dataset missing");
+    }
+}

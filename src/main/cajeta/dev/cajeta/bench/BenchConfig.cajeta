@@ -1,0 +1,138 @@
+package dev.cajeta.bench;
+
+import dev.cajeta.bench.BenchClock;
+import dev.cajeta.bench.detect.OsDetect;
+import dev.cajeta.bench.detect.DriverDetect;
+
+/**
+ * Everything about one run that is not a benchmark: the run id, smoke mode,
+ * the toolchain identity written into every row, the detected OS, the
+ * per-family driver strings (detected once, on first use), and the clock.
+ *
+ * `fromEnv()` is what `BenchMain` uses. The environment it reads:
+ *
+ *   CAJETA_BENCH_SMOKE           1/true: warmup 1, trials 3, rows tagged `smoke`
+ *   CAJETA_BENCH_RUN_ID          the run id (PROFILE_RUN_ID still honored)
+ *   CAJETA_BENCH_CAJETA_VERSION  language_version of cajeta rows
+ *                                (PROFILE_CAJETA_VERSION still honored)
+ *   CAJETA_BENCH_FLAGS           the flags column of cajeta rows
+ *   CAJETA_BENCH_MACHINE         read per row by Benchmark.machine()
+ */
+public class BenchConfig {
+    public boolean smoke;
+    public String runId;
+    public String languageVersion;
+    public String flags;
+    public String os;
+    public BenchClock clock;
+
+    public String nvidiaDriver;
+    public String rocmDriver;
+    public String vulkanDriver;
+    public boolean nvidiaKnown;
+    public boolean rocmKnown;
+    public boolean vulkanKnown;
+
+    public BenchConfig() {
+        this.smoke = false;
+        this.runId = "local-run";
+        this.languageVersion = "";
+        // What the `release` flavor the consumer's bench task builds with is
+        // expected to be; CAJETA_BENCH_FLAGS overrides it with the truth.
+        this.flags = "--release -O3 -march=native";
+        this.os = "";
+        this.clock = heap BenchClock();
+        this.nvidiaDriver = "";
+        this.rocmDriver = "";
+        this.vulkanDriver = "";
+        this.nvidiaKnown = false;
+        this.rocmKnown = false;
+        this.vulkanKnown = false;
+    }
+
+    public static #BenchConfig fromEnv() {
+        BenchConfig c = heap BenchConfig();
+        c.smoke = BenchConfig.parseSmoke(System.env.get("CAJETA_BENCH_SMOKE"));
+        String rid #= BenchConfig.envOr("CAJETA_BENCH_RUN_ID", "PROFILE_RUN_ID");
+        if (rid != null) {
+            c.runId = "" + rid;
+        }
+        String ver #= BenchConfig.envOr("CAJETA_BENCH_CAJETA_VERSION", "PROFILE_CAJETA_VERSION");
+        if (ver != null) {
+            c.languageVersion = "" + ver;
+        }
+        String fl = System.env.get("CAJETA_BENCH_FLAGS");
+        if (fl != null) {
+            c.flags = "" + fl;
+        }
+        c.os #= OsDetect.detect();
+        return c;
+    }
+
+    /** A copy of the first of two environment variables that is set, else null. */
+    public static #String envOr(String primary, String legacy) {
+        String a = System.env.get(primary);
+        if (a != null) {
+            return "" + a;
+        }
+        String b = System.env.get(legacy);
+        if (b != null) {
+            return "" + b;
+        }
+        return null;
+    }
+
+    public static boolean parseSmoke(String v) {
+        if (v == null) {
+            return false;
+        }
+        return v.equals("1") || v.equals("true") || v.equals("yes");
+    }
+
+    /** Replace the clock (tests: a scripted FakeClock). */
+    public void useClock(#BenchClock c) {
+        this.clock #= c;
+    }
+
+    /** Pin the driver string for `backend`'s family instead of detecting it. */
+    public void setDriver(String backend, String driver) {
+        String fam #= DriverDetect.family(backend);
+        if (fam.equals("nvidia")) {
+            this.nvidiaDriver = "" + driver;
+            this.nvidiaKnown = true;
+        } else if (fam.equals("rocm")) {
+            this.rocmDriver = "" + driver;
+            this.rocmKnown = true;
+        } else if (fam.equals("vulkan")) {
+            this.vulkanDriver = "" + driver;
+            this.vulkanKnown = true;
+        }
+    }
+
+    /** The driver column for a row on `backend`: "" on cpu, detected once per family. */
+    public #String driverFor(String backend) {
+        String fam #= DriverDetect.family(backend);
+        if (fam.equals("nvidia")) {
+            if (!this.nvidiaKnown) {
+                this.nvidiaDriver #= DriverDetect.forBackend(backend);
+                this.nvidiaKnown = true;
+            }
+            return "" + this.nvidiaDriver;
+        }
+        if (fam.equals("rocm")) {
+            if (!this.rocmKnown) {
+                this.rocmDriver #= DriverDetect.forBackend(backend);
+                this.rocmKnown = true;
+            }
+            return "" + this.rocmDriver;
+        }
+        if (fam.equals("vulkan")) {
+            if (!this.vulkanKnown) {
+                this.vulkanDriver #= DriverDetect.forBackend(backend);
+                this.vulkanKnown = true;
+            }
+            return "" + this.vulkanDriver;
+        }
+        return "";
+    }
+}

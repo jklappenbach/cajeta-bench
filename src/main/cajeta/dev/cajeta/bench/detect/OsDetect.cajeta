@@ -1,0 +1,149 @@
+package dev.cajeta.bench.detect;
+
+import dev.cajeta.bench.detect.Sys;
+
+/**
+ * The `os` column: the operating system's name and version, with `WSL2`
+ * when the Linux kernel is Microsoft's (spec §3.2, §7.1). Examples:
+ * `Ubuntu 26.04`, `Ubuntu 24.04 (WSL2)`, `Windows 11 (10.0.26100.4652)`.
+ *
+ * `detect()` gathers the text; the `from*` parsers are pure so the suite
+ * pins them on recorded output (plan 16.1.3).
+ */
+public final class OsDetect {
+
+    public static #String detect() {
+        String osEnv = System.env.get("OS");
+        if (osEnv != null) {
+            if (osEnv.equals("Windows_NT")) {
+                String ver #= Sys.run2("cmd", "/c", "ver");
+                return OsDetect.fromWindowsVer(ver);
+            }
+        }
+        String rel #= Sys.readText("/etc/os-release");
+        if (rel.isEmpty()) {
+            rel #= Sys.readText("/usr/lib/os-release");
+        }
+        String pv #= Sys.readText("/proc/version");
+        if (rel.isEmpty() && pv.isEmpty()) {
+            // Not Linux (macOS, a BSD): uname names the kernel at least.
+            String u #= Sys.run1("uname", "-sr");
+            String t #= u.trim();
+            if (!t.isEmpty()) {
+                return t;
+            }
+        }
+        return OsDetect.fromLinux(rel, pv);
+    }
+
+    /**
+     * `NAME VERSION_ID` from os-release, else `PRETTY_NAME`, else `Linux`;
+     * then ` (WSL2)` / ` (WSL1)` when /proc/version names Microsoft's kernel.
+     */
+    public static #String fromLinux(String osRelease, String procVersion) {
+        String name #= Sys.keyValue(osRelease, "NAME");
+        String ver #= Sys.keyValue(osRelease, "VERSION_ID");
+        String base = "Linux";
+        if (!name.isEmpty()) {
+            if (!ver.isEmpty()) {
+                base = name + " " + ver;
+            } else {
+                base = "" + name;
+            }
+        } else {
+            String pretty #= Sys.keyValue(osRelease, "PRETTY_NAME");
+            if (!pretty.isEmpty()) {
+                base = "" + pretty;
+            }
+        }
+        String wsl #= OsDetect.wslTag(procVersion);
+        if (!wsl.isEmpty()) {
+            return base + " (" + wsl + ")";
+        }
+        return base;
+    }
+
+    /** `WSL2`, `WSL1`, or "" from a /proc/version (or uname -r) string. */
+    public static #String wslTag(String kernel) {
+        if (kernel == null) {
+            return "";
+        }
+        String k #= kernel.toLowerCase();
+        if (k.contains("wsl2") || k.contains("microsoft-standard")) {
+            return "WSL2";
+        }
+        if (k.contains("microsoft")) {
+            return "WSL1";
+        }
+        return "";
+    }
+
+    /**
+     * `cmd /c ver` → `Windows 11 (10.0.26100.4652)`. Windows 11 still reports
+     * major version 10; it is told apart by build number, 22000 and up. The
+     * version is read as the digits after the first '[', so a localized
+     * "[Versión ...]" parses the same.
+     */
+    public static #String fromWindowsVer(String ver) {
+        if (ver == null) {
+            return "Windows";
+        }
+        int64 lb = ver.indexOf("[");
+        if (lb < 0) {
+            return "Windows";
+        }
+        int32 n = (int32) ver.count();
+        int32 i = (int32) lb + 1;
+        while (i < n && (ver.byteAt(i) < 48 || ver.byteAt(i) > 57)) {
+            i = i + 1;
+        }
+        int32 j = i;
+        while (j < n && ver.byteAt(j) != 93) {
+            j = j + 1;
+        }
+        String v #= ver.substring(i, j);
+        String vt #= v.trim();
+        if (vt.isEmpty()) {
+            return "Windows";
+        }
+        int64 major = OsDetect.component(vt, 0);
+        int64 build = OsDetect.component(vt, 2);
+        if (major == 10 && build >= 22000) {
+            return "Windows 11 (" + vt + ")";
+        }
+        if (major == 10) {
+            return "Windows 10 (" + vt + ")";
+        }
+        return "Windows (" + vt + ")";
+    }
+
+    /** The `idx`-th dot-separated decimal component of `v`, or -1. */
+    public static int64 component(String v, int32 idx) {
+        int32 n = (int32) v.count();
+        int32 part = 0;
+        int64 val = (int64) 0;
+        boolean any = false;
+        int32 i = 0;
+        while (i < n) {
+            int8 c = v.byteAt(i);
+            if (c == 46) {
+                if (part == idx) {
+                    break;
+                }
+                part = part + 1;
+                val = (int64) 0;
+                any = false;
+            } else if (c >= 48 && c <= 57) {
+                if (part == idx) {
+                    val = val * 10 + (int64) (c - 48);
+                    any = true;
+                }
+            }
+            i = i + 1;
+        }
+        if (part != idx || !any) {
+            return (int64) -1;
+        }
+        return val;
+    }
+}

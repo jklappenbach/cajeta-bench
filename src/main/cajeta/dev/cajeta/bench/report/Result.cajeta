@@ -8,6 +8,11 @@ import dev.cajeta.bench.report.Csv;
 // correctness cross-check. Emitted as a CSV row; header() and toRow() share a
 // fixed column order keyed by schema_version. Numbers default to -1 ("not
 // measured"); strings default to "".
+//
+// Schema v2 (benchmark-reference spec §3.2) is v1's 32 columns, unchanged and
+// in their v1 order, followed by machine, os, driver, model and platform: 37
+// columns. They are row columns rather than env.csv facts so one page can lay
+// rows from different machines, operating systems and drivers side by side.
 public class Result {
 
     public int32 schemaVersion;
@@ -37,14 +42,20 @@ public class Result {
     public int64 allocBytes;
     public int64 allocCount;
     public int64 workingSetKb;
-    public String status;            // ok | skipped | invalid
+    public String status;            // ok | skipped | invalid | failed
     public boolean checkOk;
     public String notes;
     public String variant;           // pattern×prediction / access-pattern label ("" if none)
     public String backend;           // xpu backend that produced the row (cpu|hip|vulkan|...); cpu default
+    // ---- schema v2 ----
+    public String machine;           // CAJETA_BENCH_MACHINE or the hostname (phoenix, proton)
+    public String os;                // `Ubuntu 24.04 (WSL2)`, `Windows 11 (10.0.26100.4652)`
+    public String driver;            // `NVIDIA 610.88 CUDA 13.3`; empty on cpu rows
+    public String model;             // LLM/ML model + quantization + checksum; empty elsewhere
+    public String platform;          // engine or library (`cajeta-llm 0.9.0 hip`, `llama.cpp`); the language for language rows
 
     public Result() {
-        this.schemaVersion = 1;
+        this.schemaVersion = 2;
         this.runId = "";
         this.timestampUnix = "";
         this.benchmark = "";
@@ -76,10 +87,19 @@ public class Result {
         this.notes = "";
         this.variant = "";
         this.backend = "cpu";
+        this.machine = "";
+        this.os = "";
+        this.driver = "";
+        this.model = "";
+        this.platform = "";
+    }
+
+    public static int32 SCHEMA_VERSION() {
+        return 2;
     }
 
     public static #String header() {
-        return "schema_version,run_id,timestamp_unix,benchmark,area,dataset_name,dataset_bytes,dataset_sha256,input_size,language,language_version,library,library_version,flags,warmup,trials,min_ns,median_ns,mean_ns,p95_ns,throughput,throughput_unit,peak_rss_kb,cgroup_peak_kb,alloc_bytes,alloc_count,working_set_kb,status,check_ok,notes,variant,backend";
+        return "schema_version,run_id,timestamp_unix,benchmark,area,dataset_name,dataset_bytes,dataset_sha256,input_size,language,language_version,library,library_version,flags,warmup,trials,min_ns,median_ns,mean_ns,p95_ns,throughput,throughput_unit,peak_rss_kb,cgroup_peak_kb,alloc_bytes,alloc_count,working_set_kb,status,check_ok,notes,variant,backend,machine,os,driver,model,platform";
     }
 
     public #String toRow() {
@@ -115,6 +135,11 @@ public class Result {
         s = s + "," + Csv.field(this.notes);
         s = s + "," + Csv.field(this.variant);
         s = s + "," + Csv.field(this.backend);
+        s = s + "," + Csv.field(this.machine);
+        s = s + "," + Csv.field(this.os);
+        s = s + "," + Csv.field(this.driver);
+        s = s + "," + Csv.field(this.model);
+        s = s + "," + Csv.field(this.platform);
         return s;
     }
 }

@@ -1,0 +1,100 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/**
+ * Plan 14.1.3: a device row with a competitor is measured in interleaved
+ * rounds (ours, competitor, ours, competitor, ...) and each side reports its
+ * median. Timed with a scripted clock so every duration is exact.
+ */
+public class InterleaveTests {
+
+    public InterleaveTests() {
+        return;
+    }
+
+    // Three rounds. Ours: 100, 900, 100 (median 100, p95 900).
+    // Competitor: 300, 500, 300 (median 300, p95 500).
+    static #BenchConfig scriptedConfig() {
+        int64[] s = heap int64[12];
+        s[0] = 0;     s[1] = 100;    s[2] = 100;   s[3] = 400;
+        s[4] = 400;   s[5] = 1300;   s[6] = 1300;  s[7] = 1800;
+        s[8] = 1800;  s[9] = 1900;   s[10] = 1900; s[11] = 2200;
+        FakeClock fc = heap FakeClock(#s);
+        BenchConfig cfg = heap BenchConfig();
+        cfg.useClock(#fc);
+        cfg.setDriver("cuda", "NVIDIA 610.88 CUDA 13.3");
+        return cfg;
+    }
+
+    @Test
+    public void roundsAlternateOursAndTheCompetitor() {
+        BenchConfig cfg #= InterleaveTests.scriptedConfig();
+        DeviceBench b = heap DeviceBench("cuda", true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        // warmup 1 round, 3 measured rounds, then ours once more for the
+        // untimed allocation count.
+        Assert.that(b.log).isEqualTo("oc" + "ocococ" + "o");
+        return;
+    }
+
+    @Test
+    public void eachSideReportsItsOwnMedianOnItsOwnRow() {
+        BenchConfig cfg #= InterleaveTests.scriptedConfig();
+        DeviceBench b = heap DeviceBench("cuda", true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(2);
+        Result ours = rows.get(0);
+        Assert.that(ours.language).isEqualTo("cajeta");
+        Assert.that(ours.platform).isEqualTo("cajeta");
+        Assert.that(ours.minNs).isEqualTo(100);
+        Assert.that(ours.medianNs).isEqualTo(100);
+        Assert.that(ours.p95Ns).isEqualTo(900);
+        Assert.that(ours.notes).contains("interleaved");
+        Assert.that(ours.driver).isEqualTo("NVIDIA 610.88 CUDA 13.3");
+        Result comp = rows.get(1);
+        Assert.that(comp.language).isEqualTo("cuda-c++");
+        Assert.that(comp.platform).isEqualTo("BabelStream 5.0 cuda");
+        Assert.that(comp.languageVersion).isEqualTo("12.6");
+        Assert.that(comp.minNs).isEqualTo(300);
+        Assert.that(comp.medianNs).isEqualTo(300);
+        Assert.that(comp.p95Ns).isEqualTo(500);
+        Assert.that(comp.backend).isEqualTo("cuda");
+        Assert.that(comp.driver).isEqualTo("NVIDIA 610.88 CUDA 13.3");
+        Assert.that(comp.notes).contains("interleaved");
+        Assert.that(comp.status).isEqualTo("ok");
+        Assert.that((int64) comp.trials).isEqualTo(3);
+        return;
+    }
+
+    @Test
+    public void aCpuRowIsNotInterleavedEvenWithACompetitor() {
+        BenchConfig cfg = heap BenchConfig();
+        DeviceBench b = heap DeviceBench("cpu", true);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(1);
+        Assert.that(b.log).isEqualTo("ooooo");
+        Assert.that(rows.get(0).driver).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void aDeviceRowWithoutACompetitorIsMeasuredAlone() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.setDriver("vulkan", "Vulkan radv Mesa 25.0.7");
+        DeviceBench b = heap DeviceBench("vulkan", false);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(1);
+        Assert.that(b.log).isEqualTo("ooooo");
+        Assert.that(rows.get(0).driver).isEqualTo("Vulkan radv Mesa 25.0.7");
+        return;
+    }
+}

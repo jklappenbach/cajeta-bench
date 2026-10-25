@@ -1,0 +1,56 @@
+package dev.cajeta.bench.test;
+
+import cajeta.io.file.File;
+import cajeta.io.file.FileReader;
+
+/** Small helpers the suites share: a scratch path and a whole-file read. */
+public final class TestFiles {
+    public static #String scratch(String leaf) {
+        String dir = System.env.get("BENCH_TEST_TMP");
+        if (dir == null) {
+            return "" + leaf;
+        }
+        return dir + "/" + leaf;
+    }
+
+    public static #String read(String path) {
+        FileReader r #= File.openRead(path);
+        if (r.fd < 0) {
+            return "";
+        }
+        String text #= r.readString(1048576);
+        r.close();
+        return text;
+    }
+
+    public static int32 lineCount(String text) {
+        int32 n = (int32) text.count();
+        int32 lines = 0;
+        int32 i = 0;
+        while (i < n) {
+            if (text.byteAt(i) == 10) {
+                lines = lines + 1;
+            }
+            i = i + 1;
+        }
+        return lines;
+    }
+
+    public static int32 fieldCount(String line) {
+        int32 n = (int32) line.count();
+        int32 fields = 1;
+        boolean quoted = false;
+        int32 i = 0;
+        while (i < n) {
+            int8 c = line.byteAt(i);
+            if (c == 34) {
+                quoted = !quoted;
+            }
+            if (c == 44 && !quoted) {
+                fields = fields + 1;
+            }
+            i = i + 1;
+        }
+        return fields;
+    }
+}

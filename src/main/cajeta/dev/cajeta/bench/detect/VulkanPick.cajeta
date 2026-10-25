@@ -1,0 +1,51 @@
+package dev.cajeta.bench.detect;
+
+/**
+ * Accumulates `vulkaninfo --summary` device blocks and keeps the first real
+ * GPU (any deviceType that is not PHYSICAL_DEVICE_TYPE_CPU) and the first
+ * device of any kind, so llvmpipe is reported only when it is all there is.
+ */
+public class VulkanPick {
+    public String firstName;
+    public String firstInfo;
+    public String gpuName;
+    public String gpuInfo;
+
+    public VulkanPick() {
+        this.firstName = "";
+        this.firstInfo = "";
+        this.gpuName = "";
+        this.gpuInfo = "";
+    }
+
+    public void offer(String type, String name, String info) {
+        if (name.isEmpty()) {
+            return;
+        }
+        if (this.firstName.isEmpty()) {
+            this.firstName = "" + name;
+            this.firstInfo = "" + info;
+        }
+        if (this.gpuName.isEmpty() && !type.contains("CPU")) {
+            this.gpuName = "" + name;
+            this.gpuInfo = "" + info;
+        }
+    }
+
+    public #String describe() {
+        if (!this.gpuName.isEmpty()) {
+            return VulkanPick.join(this.gpuName, this.gpuInfo);
+        }
+        if (!this.firstName.isEmpty()) {
+            return VulkanPick.join(this.firstName, this.firstInfo);
+        }
+        return "";
+    }
+
+    public static #String join(String name, String info) {
+        if (info.isEmpty()) {
+            return "Vulkan " + name;
+        }
+        return "Vulkan " + name + " " + info;
+    }
+}

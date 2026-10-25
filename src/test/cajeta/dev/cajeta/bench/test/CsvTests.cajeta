@@ -1,0 +1,65 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.report.Csv;
+import dev.cajeta.bench.report.Result;
+
+/** Plan 1.1.3: the schema-v2 header, in order, and rows that match it. */
+public class CsvTests {
+
+    public CsvTests() {
+        return;
+    }
+
+    static #String v1Header() {
+        return "schema_version,run_id,timestamp_unix,benchmark,area,dataset_name,dataset_bytes,dataset_sha256,input_size,language,language_version,library,library_version,flags,warmup,trials,min_ns,median_ns,mean_ns,p95_ns,throughput,throughput_unit,peak_rss_kb,cgroup_peak_kb,alloc_bytes,alloc_count,working_set_kb,status,check_ok,notes,variant,backend";
+    }
+
+    @Test
+    public void headerIsV1InOrderPlusTheFiveV2Columns() {
+        String expected #= CsvTests.v1Header() + ",machine,os,driver,model,platform";
+        String h #= Result.header();
+        Assert.that(h).isEqualTo(expected);
+        Assert.that((int64) TestFiles.fieldCount(h)).isEqualTo(37);
+        String v1 #= CsvTests.v1Header();
+        Assert.that(h).startsWith(v1);
+        return;
+    }
+
+    @Test
+    public void aRowHasAsManyFieldsAsTheHeaderAndLeadsWithVersionTwo() {
+        Result r = heap Result();
+        r.notes = "has, a comma and a \"quote\"";
+        r.machine = "phoenix";
+        r.os = "Ubuntu 24.04 (WSL2)";
+        r.driver = "NVIDIA 610.88 CUDA 13.3";
+        r.platform = "cajeta";
+        String row #= r.toRow();
+        Assert.that((int64) TestFiles.fieldCount(row)).isEqualTo(37);
+        Assert.that(row).startsWith("2,");
+        Assert.that(row).endsWith(",phoenix,Ubuntu 24.04 (WSL2),NVIDIA 610.88 CUDA 13.3,,cajeta");
+        Assert.that(row).contains("\"has, a comma and a \"\"quote\"\"\"");
+        return;
+    }
+
+    @Test
+    public void writeEmitsTheHeaderThenOneLinePerRow() {
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Result a = heap Result();
+        a.benchmark = "a";
+        rows.add(#a);
+        Result b = heap Result();
+        b.benchmark = "b";
+        rows.add(#b);
+        String path #= TestFiles.scratch("csv-write.csv");
+        Csv.write(path, rows);
+        String text #= TestFiles.read(path);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(3);
+        String h #= Result.header();
+        Assert.that(text).startsWith(h + "\n2,");
+        String rendered #= Csv.render(rows);
+        Assert.that(text).isEqualTo(rendered);
+        return;
+    }
+}

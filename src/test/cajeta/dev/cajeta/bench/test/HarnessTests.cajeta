@@ -1,0 +1,108 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.Machine;
+import dev.cajeta.bench.report.Result;
+
+/** Plan 1.1.1: one measured row, its distribution and its v2 identity. */
+public class HarnessTests {
+
+    public HarnessTests() {
+        return;
+    }
+
+    @Test
+    public void measuredRowHasOrderedDistributionAndV2Identity() {
+        BenchConfig cfg #= BenchConfig.fromEnv();
+        CountingBench b = heap CountingBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(1);
+        Result r = rows.get(0);
+        Assert.that(r.minNs).isGreaterThanOrEqualTo(0);
+        Assert.that(r.minNs).isLessThanOrEqualTo(r.medianNs);
+        Assert.that(r.medianNs).isLessThanOrEqualTo(r.p95Ns);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.isTrue(r.checkOk);
+        Assert.that((int64) r.schemaVersion).isEqualTo(2);
+        Assert.that((int64) r.warmup).isEqualTo(2);
+        Assert.that((int64) r.trials).isEqualTo(5);
+        Assert.that(r.benchmark).isEqualTo("counting");
+        Assert.that(r.area).isEqualTo("test/counting");
+        Assert.that(r.language).isEqualTo("cajeta");
+        // run-tests.sh pins CAJETA_BENCH_MACHINE=bench-test-machine.
+        Assert.that(r.machine).isEqualTo("bench-test-machine");
+        // warmup 2 + trials 5 + the one untimed allocation-count run.
+        Assert.that((int64) b.runs).isEqualTo(8);
+        return;
+    }
+
+    @Test
+    public void languageRowsDefaultPlatformToTheLanguageAndLeaveDriverEmpty() {
+        BenchConfig cfg #= BenchConfig.fromEnv();
+        CountingBench b = heap CountingBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.platform).isEqualTo("cajeta");
+        Assert.that(r.backend).isEqualTo("cpu");
+        Assert.that(r.driver).isEqualTo("");
+        Assert.that(r.model).isEqualTo("");
+        Assert.that(r.os).isNotEmpty();
+        Assert.that(r.notes).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void everyV2HookReachesTheRow() {
+        BenchConfig cfg = heap BenchConfig();
+        DescribedBench b = heap DescribedBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.machine).isEqualTo("proton");
+        Assert.that(r.throughputUnit).isEqualTo("tokens/s");
+        Assert.that(r.notes).contains("llama.cpp b6123 built -DGGML_HIP=ON");
+        Assert.that(r.platform).isEqualTo("cajeta-llm 0.9.0 hip");
+        Assert.that(r.model).isEqualTo("Llama-3.1-8B Q4_K_M sha256:abc123");
+        Assert.that(r.area).isEqualTo("llm/decode");
+        return;
+    }
+
+    @Test
+    public void theConfiguredClockTimesEveryTrial() {
+        // Trials of 10, 30, 20 ns: min 10, median 20, p95 30, mean 20.
+        int64[] script = heap int64[6];
+        script[0] = 0;   script[1] = 10;
+        script[2] = 100; script[3] = 130;
+        script[4] = 200; script[5] = 220;
+        FakeClock fc = heap FakeClock(#script);
+        BenchConfig cfg = heap BenchConfig();
+        cfg.useClock(#fc);
+        VariantsBench b = heap VariantsBench(false);
+        Result r #= Harness.measureOne(b, cfg, "small");
+        Assert.that(r.minNs).isEqualTo(10);
+        Assert.that(r.medianNs).isEqualTo(20);
+        Assert.that(r.p95Ns).isEqualTo(30);
+        Assert.that(r.meanNs).isEqualTo(20);
+        return;
+    }
+
+    @Test
+    public void machineComesFromTheEnvironmentElseTheHostnameLowercased() {
+        String a #= Machine.fromSources("proton", "ignored");
+        Assert.that(a).isEqualTo("proton");
+        String b #= Machine.fromSources(null, "Phoenix\n");
+        Assert.that(b).isEqualTo("phoenix");
+        String c #= Machine.fromSources("", "  Proton-2 \n");
+        Assert.that(c).isEqualTo("proton-2");
+        String d #= Machine.fromSources(null, "");
+        Assert.that(d).isEqualTo("unknown");
+        String live #= Machine.resolve();
+        Assert.that(live).isEqualTo("bench-test-machine");
+        return;
+    }
+}

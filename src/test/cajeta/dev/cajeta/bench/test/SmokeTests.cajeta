@@ -1,0 +1,59 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/** Plan 1.1.3 / spec 3.3.3: smoke mode collapses the run and tags the row. */
+public class SmokeTests {
+
+    public SmokeTests() {
+        return;
+    }
+
+    @Test
+    public void smokeCollapsesToWarmupOneTrialsThreeAndTagsTheRow() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.smoke = true;
+        CountingBench b = heap CountingBench();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that((int64) r.warmup).isEqualTo(1);
+        Assert.that((int64) r.trials).isEqualTo(3);
+        Assert.that(r.notes).contains("smoke");
+        Assert.that((int64) b.runs).isEqualTo(5);
+        return;
+    }
+
+    @Test
+    public void smokeTagsSkippedAndFailedRowsToo() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.smoke = true;
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        ThrowingBench t = heap ThrowingBench();
+        Harness.measureInto(t, cfg, rows);
+        VariantsBench v = heap VariantsBench(true);
+        Harness.measureInto(v, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(4);
+        Assert.that(rows.get(0).notes).contains("smoke");
+        Assert.that(rows.get(3).status).isEqualTo("skipped");
+        Assert.that(rows.get(3).notes).contains("smoke");
+        return;
+    }
+
+    @Test
+    public void theSmokeEnvironmentValueIsParsed() {
+        Assert.isTrue(BenchConfig.parseSmoke("1"));
+        Assert.isTrue(BenchConfig.parseSmoke("true"));
+        Assert.isFalse(BenchConfig.parseSmoke("0"));
+        Assert.isFalse(BenchConfig.parseSmoke(""));
+        Assert.isFalse(BenchConfig.parseSmoke(null));
+        // run-tests.sh clears CAJETA_BENCH_SMOKE.
+        BenchConfig cfg #= BenchConfig.fromEnv();
+        Assert.isFalse(cfg.smoke);
+        return;
+    }
+}

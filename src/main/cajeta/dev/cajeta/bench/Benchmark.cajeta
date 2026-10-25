@@ -2,25 +2,26 @@ package dev.cajeta.bench;
 
 import cajeta.collection.ArrayList;
 
-// Base class for every benchmark in the suite. Each benchmark extends
-// Benchmark and overrides the lifecycle methods; the Profile entry point
+import dev.cajeta.bench.Machine;
+
+// Base class for every benchmark in the ecosystem. Each benchmark extends
+// Benchmark and overrides the lifecycle methods; a consumer's entry point
 // builds an ArrayList<Benchmark>, pushes one instance of every benchmark
-// into it, then walks the list driving each through its lifecycle — so
-// adding a benchmark means writing a new .cajeta file here and one
-// `benchmarks.add(heap NewBenchmark());` line in Profile.cajeta (the same
-// "add a demo" ergonomics as the tour's DemoClass).
+// into it, and hands the list to BenchMain.run, which lists or measures them
+// — so adding a benchmark means writing a new .cajeta file and one
+// `benchmarks.add(heap NewBenchmark());` line.
 //
 // As in the tour, Cajeta has no formal `abstract` keyword today, so these
 // land as empty/identity concrete methods; subclasses override by signature.
-// The lifecycle the Profile runner invokes, in order, per benchmark:
+// The lifecycle the Harness invokes, in order, per benchmark:
 //
 //   setup()        — allocate inputs, fetch/checksum datasets (later units)
 //   run(iters)     — execute the measured workload `iters` times
 //   teardown()     — release inputs
 //   checkResult()  — structural correctness cross-check (true = pass)
 //
-// name()/area() identify the benchmark (used by `--list` and, later, as CSV
-// columns); datasetInfo() describes the input (name/size/checksum) for the
+// name()/area() identify the benchmark (used by `--list` and as CSV
+// columns; area() is the catalog path, `collection/hashmap`); datasetInfo() describes the input (name/size/checksum) for the
 // reproducibility record.
 public class Benchmark {
 
@@ -107,7 +108,9 @@ public class Benchmark {
         this.run(iterations);
     }
 
-    // Lifecycle. setup → run → teardown → checkResult, driven by Profile.
+    // Lifecycle. setup → run → teardown → checkResult, driven by Harness.
+    // A throw from setup, run or runVariant becomes a `failed` row carrying
+    // the message; the run continues with the next variant or benchmark.
     public void setup() {
     }
 
@@ -120,6 +123,74 @@ public class Benchmark {
     // Structural correctness cross-check. true = the workload produced the
     // expected result this run; false marks the result invalid.
     public boolean checkResult() {
+        return true;
+    }
+
+    // ---- schema v2 identity (spec §3.2) --------------------------------
+
+    // The `machine` column: CAJETA_BENCH_MACHINE, else the hostname
+    // lowercased. Override only for a row measured somewhere else.
+    public String machine() {
+        return Machine.resolve();
+    }
+
+    // The throughput unit (`MB/s`, `tokens/s`, `req/s`) written to
+    // throughput_unit, so the site's chart labels itself. "" = time only.
+    public String unit() {
+        return "";
+    }
+
+    // Free text appended to the row's notes: competitor build flags, the
+    // greedy-agreement rate, anything a reader needs to trust the number.
+    public String competitorNote() {
+        return "";
+    }
+
+    // The engine or library that produced the row (`cajeta-llm 0.9.0 hip`,
+    // `dev.cajeta.http 0.9.1`). Language and stdlib rows keep the language.
+    public String platform() {
+        return "cajeta";
+    }
+
+    // The LLM or ML model identity with its quantization and checksum
+    // (`Llama-3.1-8B Q4_K_M sha256:...`). "" outside ml and llm.
+    public String model() {
+        return "";
+    }
+
+    // ---- interleaved device rounds (spec §8.1, plan 14.1.3) -------------
+    //
+    // A row whose backend() is not "cpu" and that declares a competitor is
+    // measured in interleaved rounds: ours, competitor, ours, competitor,
+    // ..., so both sides see the same clocks and the same thermal state. Each
+    // side's median goes on its own row. runCompetitor is the competitor's
+    // measured body for one iteration (typically a launch of its prebuilt
+    // reference binary or a call into its library).
+
+    public boolean hasCompetitor() {
+        return false;
+    }
+
+    // language column of the competitor row (`cuda-c++`, `hip-c++`, `python`).
+    public String competitorLanguage() {
+        return "";
+    }
+
+    // platform column of the competitor row (`BabelStream 5.0 cuda`, `llama.cpp b6123 hip`).
+    public String competitorPlatform() {
+        return "";
+    }
+
+    // language_version of the competitor row (toolchain or library version).
+    public String competitorVersion() {
+        return "";
+    }
+
+    public void runCompetitor(String variant, int32 iterations) {
+    }
+
+    // Correctness of the competitor's last run; false marks its row invalid.
+    public boolean checkCompetitor() {
         return true;
     }
 }

@@ -1,0 +1,110 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.Benchmark;
+import dev.cajeta.bench.BenchMain;
+
+/** Plan 1.2.2: the --list / --run / --area / --bench / --out command line. */
+public class BenchMainTests {
+
+    public BenchMainTests() {
+        return;
+    }
+
+    static #ArrayList<Benchmark> suite() {
+        ArrayList<Benchmark> list = heap ArrayList<Benchmark>();
+        list.add(heap CountingBench());
+        list.add(heap VariantsBench(true));
+        list.add(heap ThrowingBench());
+        return list;
+    }
+
+    static #String[] argv3(String a, String b, String c) {
+        String[] v = heap String[3];
+        v[0] = "" + a;
+        v[1] = "" + b;
+        v[2] = "" + c;
+        return v;
+    }
+
+    @Test
+    public void listExitsZeroWithoutMeasuring() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String[] args = heap String[1];
+        args[0] = "--list";
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(0);
+        CountingBench c = (CountingBench) list.get(0);
+        Assert.that((int64) c.runs).isEqualTo(0);
+        return;
+    }
+
+    @Test
+    public void runWritesEveryRowAndExitsNonZeroWhenARowFailed() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String out #= TestFiles.scratch("main-all.csv");
+        String[] args #= BenchMainTests.argv3("--run", "--out", out);
+        // counting (1) + variants (3, one skipped) + throwing (1 failed)
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(1);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(6);
+        Assert.that(text).contains(",failed,");
+        return;
+    }
+
+    @Test
+    public void areaAndBenchSelectRows() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String out #= TestFiles.scratch("main-area.csv");
+        String[] args = heap String[5];
+        args[0] = "--run";
+        args[1] = "--area";
+        args[2] = "test/variants";
+        args[3] = "--out";
+        args[4] = "" + out;
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(0);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(4);
+
+        String out2 #= TestFiles.scratch("main-bench.csv");
+        String[] args2 = heap String[5];
+        args2[0] = "--run";
+        args2[1] = "--bench";
+        args2[2] = "counting";
+        args2[3] = "--out";
+        args2[4] = "" + out2;
+        Assert.that((int64) BenchMain.run(args2, list)).isEqualTo(0);
+        String text2 #= TestFiles.read(out2);
+        Assert.that((int64) TestFiles.lineCount(text2)).isEqualTo(2);
+        Assert.that(text2).contains(",counting,test/counting,");
+        return;
+    }
+
+    @Test
+    public void runAlsoWritesEnvCsvBesideResults() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String out #= TestFiles.scratch("results.csv");
+        String[] args = heap String[5];
+        args[0] = "--run";
+        args[1] = "--bench";
+        args[2] = "counting";
+        args[3] = "--out";
+        args[4] = "" + out;
+        BenchMain.run(args, list);
+        String envPath #= TestFiles.scratch("env.csv");
+        String env #= TestFiles.read(envPath);
+        Assert.that(env).startsWith("key,value\n");
+        Assert.that(env).contains("machine,bench-test-machine\n");
+        Assert.that(env).contains("schema_version,2\n");
+        return;
+    }
+
+    @Test
+    public void anUnknownFlagIsAUsageError() {
+        ArrayList<Benchmark> list #= BenchMainTests.suite();
+        String[] args = heap String[1];
+        args[0] = "--frobnicate";
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(2);
+        return;
+    }
+}

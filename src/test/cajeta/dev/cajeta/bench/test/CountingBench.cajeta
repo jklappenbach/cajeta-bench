@@ -1,0 +1,32 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** A CPU benchmark that does a little work and counts how often it ran. */
+public class CountingBench extends Benchmark {
+    public int32 runs;
+    public int64 sink;
+
+    public CountingBench() {
+        this.runs = 0;
+        this.sink = (int64) 0;
+    }
+
+    public String name() { return "counting"; }
+    public String area() { return "test/counting"; }
+    public int32 warmupIters() { return 2; }
+    public int32 measuredIters() { return 5; }
+
+    public void run(int32 iterations) {
+        int32 i = 0;
+        while (i < 2000) {
+            this.sink = this.sink + (int64) i;
+            i = i + 1;
+        }
+        this.runs = this.runs + 1;
+    }
+
+    public boolean checkResult() {
+        return this.sink > (int64) 0;
+    }
+}
