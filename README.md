@@ -12,7 +12,7 @@ library the way `dev.cajeta.unit` is the test library
 // your bench project's cajeta.json
 "settings": {
     "capabilities": ["filesystem", "clock", "env", "process"],
-    "dependencies": { "dev.cajeta.bench": "0.1.5" },
+    "dependencies": { "dev.cajeta.bench": "0.1.6" },
     "build": { "entry-method": "my.bench.Main::main" }
 },
 "tasks": {
@@ -90,7 +90,8 @@ New in v2:
 | Method | Default | Column |
 |---|---|---|
 | `machine()` | `CAJETA_BENCH_MACHINE`, else the hostname | `machine` |
-| `unit()` | `""` | `throughput_unit` (`MB/s`, `tokens/s`) |
+| `unit()` | `""` | `throughput_unit` (`MB/s`, `tokens/s`); empty on a skipped row, which measured nothing |
+| `flags()` | `""` | `flags` ("" on a cajeta row = `CAJETA_BENCH_FLAGS`) |
 | `competitorNote()` | `""` | appended to `notes` |
 | `platform()` | `"cajeta"` | `platform` (`cajeta-llm 0.9.0 hip`, `llama.cpp b6123 cuda`) |
 | `model()` | `""` | `model` (`Llama-3.1-8B Q4_K_M sha256:…`) |
@@ -138,6 +139,9 @@ generator's flags.
 kernel's ephemeral range (`Ports.ephemeralRange()`, from
 `/proc/sys/net/ipv4/ip_local_port_range`, default 32768-60999), where a load
 generator's client sockets cannot take them; successive calls walk forward.
+`Ports.freeIn(n, low, high)` does the same inside a range you choose, for a run
+that must keep its services where a firewall rule or another tool expects them;
+it throws when the range has fewer than `n` free.
 
 `throughput` is filled when `inputSize()` is not -1: `inputSize / median
 seconds`, three decimals, labelled `unit()`. So give `inputSize()` in the
@@ -183,7 +187,10 @@ with the reason in `notes`. `peak_rss_kb` is the child's peak resident set from
 `wait4` rusage, as GNU time reports it, taken in one extra untimed run under
 `/usr/bin/time -f %M` (the runtime's own reaping uses `waitpid` and exposes no
 rusage; `/proc` sampling misses short children). Without `/usr/bin/time` it is
--1. `alloc_bytes` and `working_set_kb` are -1, since they describe the waiting
+-1. When that extra run is costly, a cold compile say, `rssFromTimedRuns(true)`
+takes the peak from the timed runs instead, each under GNU time, and makes no
+extra run; the timed region then includes GNU time's own fork and wait.
+`alloc_bytes` and `working_set_kb` are -1, since they describe the waiting
 harness, and `notes` carry `external`, which the fidelity gate's allocation
 check honors.
 
@@ -201,6 +208,9 @@ phase once per warmup and trial, and stops it.
 - `peak_rss_kb` is the service's VmHWM from `/proc/<pid>/status`, summed over
   it and its descendants, sampled every `samplingMillis` while the phase runs
   and after each phase. No extra run is made for it. Linux only (-1 elsewhere).
+  A subclass whose row should report the phase command's peak instead overrides
+  `measuredPeakRssKb()` to return `childPeakRssKb()`, the measurement
+  `ExternalBenchmark` makes.
 - The stop is SIGTERM to the recorded PID, then SIGKILL after
   `stopTimeoutMillis`; never by pattern. `lastStopSignal` says which.
 - A service that dies before it is ready, or is not ready in time, fails the

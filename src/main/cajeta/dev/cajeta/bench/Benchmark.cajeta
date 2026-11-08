@@ -339,8 +339,14 @@ public class Benchmark {
         return this.competitorNote();
     }
 
-    public String flagsFor(String variant) {
+    // The row's compiler flags for the whole benchmark; flagsFor(variant)
+    // answers it per variant. "" on a cajeta row means BenchConfig.flags.
+    public String flags() {
         return "";
+    }
+
+    public String flagsFor(String variant) {
+        return this.flags();
     }
 
     // Called after each measured variant, whether it succeeded or threw: the

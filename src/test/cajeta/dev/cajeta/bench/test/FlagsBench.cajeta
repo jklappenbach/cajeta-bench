@@ -1,0 +1,49 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.bench.Benchmark;
+
+/**
+ * Two variants and a whole-benchmark flags() (0.1.6): `plain` takes flags()
+ * through the default flagsFor, `tuned` answers flagsFor itself. When
+ * `noFlags` is set the benchmark answers neither, so a cajeta row falls back to
+ * BenchConfig.flags.
+ */
+public class FlagsBench extends Benchmark {
+    public boolean noFlags;
+
+    public FlagsBench(boolean noFlags) {
+        this.noFlags = noFlags;
+    }
+
+    public String name() { return "flags"; }
+    public String area() { return "test/flags"; }
+    public int32 warmupIters() { return 0; }
+    public int32 measuredIters() { return 1; }
+    public String unit() { return "items/s"; }
+
+    public #ArrayList<String> variants() {
+        ArrayList<String> v = heap ArrayList<String>();
+        v.add("plain");
+        v.add("tuned");
+        return v;
+    }
+
+    public String flags() {
+        if (this.noFlags) {
+            return "";
+        }
+        return "--release --opt=O2";
+    }
+
+    public String flagsFor(String variant) {
+        if (!this.noFlags && variant.equals("tuned")) {
+            return "--release --opt=O3 --cpu=native";
+        }
+        return this.flags();
+    }
+
+    public boolean supportsVariant(String variant) {
+        return true;
+    }
+}

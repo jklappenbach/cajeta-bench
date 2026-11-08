@@ -575,6 +575,8 @@ public class Harness {
         Result r #= Harness.baseRow(b, cfg, variant, false);
         r.status = "skipped";
         r.checkOk = false;
+        // Nothing was measured, so there is no throughput to give a unit to.
+        r.throughputUnit = "";
         r.notes #= Harness.notesFor(b, cfg, variant, reason);
         return r;
     }

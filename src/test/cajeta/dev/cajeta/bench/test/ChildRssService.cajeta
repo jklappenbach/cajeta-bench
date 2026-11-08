@@ -1,0 +1,19 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.ServiceBenchmark;
+
+/**
+ * A ServiceBenchmark whose row reports its phase command's peak RSS, not the
+ * service's (0.1.6): cajeta has no `super`, so the subclass reaches
+ * ExternalBenchmark's child measurement through childPeakRssKb().
+ */
+public class ChildRssService extends ServiceBenchmark {
+
+    public ChildRssService() {
+        return;
+    }
+
+    public int64 measuredPeakRssKb() {
+        return this.childPeakRssKb();
+    }
+}

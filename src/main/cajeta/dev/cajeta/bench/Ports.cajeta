@@ -10,6 +10,7 @@ import dev.cajeta.bench.detect.Sys;
 // where a load generator's own client sockets can never take them.
 //
 //   int32[] p #= Ports.free(2);       // two distinct ports, each bindable now
+//   int32[] q #= Ports.freeIn(2, 41000, 41999);   // the same, inside a range
 //   int32[] r #= Ports.ephemeralRange();   // {32768, 60999} on stock Linux
 //
 // A port is free when a listener can bind 127.0.0.1:port; the listener is
@@ -69,30 +70,39 @@ public final class Ports {
     // space above it has fewer free.
     public static #int32[] free(int32 count) {
         int32[] range #= Ports.ephemeralRange();
-        int32 low = range[1] + 1;
+        return Ports.freeIn(count, range[1] + 1, 65535);
+    }
+
+    // `count` distinct free ports in [low, high]; throws when the range has
+    // fewer free. For a run that must keep its services inside a range of its
+    // own, such as a firewall rule or a port another tool reserves around.
+    public static #int32[] freeIn(int32 count, int32 low, int32 high) {
+        if (low < 1 || high > 65535 || low > high) {
+            throw heap Exception("Ports.freeIn: no ports in " + low + "-" + high);
+        }
         int32[] out = heap int32[count];
         int32 found = 0;
         int32 p = Ports.cursor;
-        if (p < low || p > 65535) {
+        if (p < low || p > high) {
             p = low;
         }
         int32 tried = 0;
-        int32 span = 65535 - low + 1;
+        int32 span = high - low + 1;
         while (found < count && tried < span) {
             if (Ports.isFree(p)) {
                 out[found] = p;
                 found = found + 1;
             }
             p = p + 1;
-            if (p > 65535) {
+            if (p > high) {
                 p = low;
             }
             tried = tried + 1;
         }
         Ports.cursor = p;
         if (found < count) {
-            throw heap Exception("Ports.free: only " + found + " of " + count
-                + " ports free above the ephemeral range (" + low + "-65535)");
+            throw heap Exception("Ports.freeIn: only " + found + " of " + count
+                + " ports free in " + low + "-" + high);
         }
         return out;
     }

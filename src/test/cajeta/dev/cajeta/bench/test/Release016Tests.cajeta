@@ -1,0 +1,189 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import cajeta.io.net.IpAddress;
+import cajeta.io.net.SocketAddress;
+import cajeta.io.net.TcpListener;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.ExternalBenchmark;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.Ports;
+import dev.cajeta.bench.report.Result;
+
+/**
+ * 0.1.6: free ports within a caller's range, the whole-benchmark flags()
+ * hook, no unit on a skipped row, the child's peak RSS reachable from a
+ * ServiceBenchmark subclass, and peak RSS taken from the timed runs.
+ */
+public class Release016Tests {
+
+    public Release016Tests() {
+        return;
+    }
+
+    // ---- (1) Ports.freeIn --------------------------------------------------
+
+    @Test
+    public void freeInHandsOutPortsInsideTheRangeOnly() {
+        int32[] p #= Ports.freeIn(3, 41000, 41063);
+        Assert.that((int64) p.count()).isEqualTo(3);
+        int32 i = 0;
+        while (i < 3) {
+            Assert.that((int64) p[i]).isGreaterThanOrEqualTo(41000);
+            Assert.that((int64) p[i]).isLessThanOrEqualTo(41063);
+            i = i + 1;
+        }
+        Assert.isTrue(p[0] != p[1] && p[1] != p[2] && p[0] != p[2]);
+        return;
+    }
+
+    // FIRES on a range with no free port: a held port is the whole range.
+    @Test
+    public void freeInThrowsWhenTheRangeHasTooFewFree() {
+        int32[] one #= Ports.freeIn(1, 41100, 41163);
+        IpAddress ip #= IpAddress.loopbackV4();
+        SocketAddress a #= SocketAddress.of(#ip, one[0]);
+        TcpListener held #= TcpListener.bind(a);
+        boolean threw = false;
+        try {
+            int32[] none #= Ports.freeIn(1, one[0], one[0]);
+        } catch (Exception e) {
+            threw = true;
+        }
+        held.close();
+        Assert.isTrue(threw);
+        return;
+    }
+
+    @Test
+    public void freeKeepsItsRangeAboveTheEphemeralOne() {
+        int32[] range #= Ports.ephemeralRange();
+        int32[] p #= Ports.free(2);
+        Assert.that((int64) p[0]).isGreaterThan((int64) range[1]);
+        Assert.that((int64) p[1]).isGreaterThan((int64) range[1]);
+        return;
+    }
+
+    // ---- (2) flags() -------------------------------------------------------
+
+    @Test
+    public void flagsIsTheWholeBenchmarkHookAndFlagsForOverridesIt() {
+        BenchConfig cfg = heap BenchConfig();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        FlagsBench b = heap FlagsBench(false);
+        Harness.measureInto(b, cfg, rows);
+        Assert.that((int64) rows.count()).isEqualTo(2);
+        Assert.that(rows.get(0).flags).isEqualTo("--release --opt=O2");
+        Assert.that(rows.get(1).flags).isEqualTo("--release --opt=O3 --cpu=native");
+        return;
+    }
+
+    @Test
+    public void noFlagsOnACajetaRowIsTheConfiguredFlags() {
+        BenchConfig cfg = heap BenchConfig();
+        cfg.flags = "--release --opt=O3 --cpu=native";
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        FlagsBench b = heap FlagsBench(true);
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(0).flags).isEqualTo("--release --opt=O3 --cpu=native");
+        return;
+    }
+
+    // ---- (3) a skipped row has no unit -------------------------------------
+
+    // FIRES on 0.1.5: the skipped row carried unit() ("items/s").
+    @Test
+    public void aSkippedRowHasNoThroughputUnit() {
+        BenchConfig cfg = heap BenchConfig();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        SkippedUnitBench u = heap SkippedUnitBench();
+        Harness.measureInto(u, cfg, rows);
+        Assert.that(rows.get(0).status).isEqualTo("skipped");
+        Assert.that(rows.get(0).throughputUnit).isEqualTo("");
+        return;
+    }
+
+    @Test
+    public void aMeasuredRowKeepsItsUnit() {
+        BenchConfig cfg = heap BenchConfig();
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        FlagsBench b = heap FlagsBench(false);
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(0).throughputUnit).isEqualTo("items/s");
+        return;
+    }
+
+    // ---- (4) childPeakRssKb from a ServiceBenchmark subclass ---------------
+
+    @Test
+    public void aServiceSubclassReachesTheChildsPeakRss() {
+        ChildRssService s = heap ChildRssService();
+        String[] argv #= ExternalTests.argv3("/usr/bin/python3", "-c", "x = bytearray(64 * 1024 * 1024)");
+        s.command(#argv);
+        if (!TestFiles.exists("/usr/bin/time") || !TestFiles.exists("/usr/bin/python3")) {
+            Assert.that(s.measuredPeakRssKb()).isEqualTo(-1);
+            return;
+        }
+        Assert.that(s.measuredPeakRssKb()).isGreaterThanOrEqualTo(65536);
+        return;
+    }
+
+    // ---- (5) peak RSS from the timed runs ----------------------------------
+
+    static #String[] appendOnce(String file) {
+        return ExternalTests.argv3("/bin/sh", "-c", "echo run >> " + file);
+    }
+
+    static int32 linesIn(String file) {
+        String t #= TestFiles.read(file);
+        int32 n = 0;
+        int32 i = 0;
+        while (i < t.byteLength()) {
+            if (t.byteAt(i) == (int8) 10) {
+                n = n + 1;
+            }
+            i = i + 1;
+        }
+        return n;
+    }
+
+    // FIRES on 0.1.5: there is no rssFromTimedRuns, and the extra run makes 5.
+    @Test
+    public void rssFromTheTimedRunsCostsNoExtraExecution() {
+        if (!TestFiles.exists("/usr/bin/time")) {
+            return;
+        }
+        String file #= TestFiles.scratch("rss-timed-runs.txt");
+        TestFiles.write(file, "");
+        String[] argv #= Release016Tests.appendOnce(file);
+        ExternalBenchmark e #= ExternalTests.named("append", #argv);
+        e.iterations(1, 3);
+        e.rssFromTimedRuns(true);
+        BenchConfig cfg = heap BenchConfig();
+        Result r #= ExternalTests.measureAlone(e, cfg);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.that((int64) Release016Tests.linesIn(file)).isEqualTo(4);
+        Assert.that(r.peakRssKb).isGreaterThan(0);
+        // The marker GNU time writes is not left in what checkResult reads.
+        Assert.isFalse(e.stderr().contains("CAJETA_BENCH_MAXRSS="));
+        return;
+    }
+
+    @Test
+    public void withoutItTheExtraUntimedRunStillMeasures() {
+        if (!TestFiles.exists("/usr/bin/time")) {
+            return;
+        }
+        String file #= TestFiles.scratch("rss-extra-run.txt");
+        TestFiles.write(file, "");
+        String[] argv #= Release016Tests.appendOnce(file);
+        ExternalBenchmark e #= ExternalTests.named("append", #argv);
+        e.iterations(1, 3);
+        BenchConfig cfg = heap BenchConfig();
+        Result r #= ExternalTests.measureAlone(e, cfg);
+        Assert.that(r.status).isEqualTo("ok");
+        Assert.that((int64) Release016Tests.linesIn(file)).isEqualTo(5);
+        return;
+    }
+}

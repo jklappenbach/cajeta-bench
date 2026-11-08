@@ -1,0 +1,17 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** Declares a throughput unit but cannot run here, so its only row is skipped (0.1.6). */
+public class SkippedUnitBench extends Benchmark {
+
+    public SkippedUnitBench() {
+        return;
+    }
+
+    public String name() { return "skipped-unit"; }
+    public String area() { return "test/skip"; }
+    public String unit() { return "items/s"; }
+    public boolean available() { return false; }
+    public String unavailableReason() { return "no device here"; }
+}

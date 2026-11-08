@@ -54,6 +54,10 @@ public class ExternalBenchmark extends Benchmark {
     public String lastStdout;
     public String lastStderr;
     public String lastVariant;
+    // rssFromTimedRuns (0.1.6): wrap every run in GNU time and keep the
+    // largest peak, instead of measuring in one extra untimed run.
+    public boolean rssTimed;
+    public int64 timedPeakKb;
 
     public ExternalBenchmark() {
         this.extName = "external";
@@ -68,6 +72,8 @@ public class ExternalBenchmark extends Benchmark {
         this.lastStdout = "";
         this.lastStderr = "";
         this.lastVariant = "";
+        this.rssTimed = false;
+        this.timedPeakKb = (int64) -1;
     }
 
     // ---- configuration ---------------------------------------------------
@@ -99,6 +105,16 @@ public class ExternalBenchmark extends Benchmark {
     // Kill a trial past `ms` and fail the row. 0 (the default) = no limit.
     public void timeoutMillis(int64 ms) {
         this.timeoutMs = ms;
+    }
+
+    // Take peak_rss_kb from the runs the harness times, each one under
+    // `/usr/bin/time`, rather than from one extra untimed run (0.1.6). For a
+    // row whose one run is costly, a cold compile say, this saves that run;
+    // the timed region then includes GNU time's own fork and wait, a fixed
+    // cost the row's notes do not hide. Without /usr/bin/time it changes
+    // nothing and the column is -1.
+    public void rssFromTimedRuns(boolean on) {
+        this.rssTimed = on;
     }
 
     // The command for `variant`. Default: the configured argv for every variant.
@@ -150,9 +166,24 @@ public class ExternalBenchmark extends Benchmark {
             throw heap Exception("ExternalBenchmark " + this.extName + " has no command");
         }
         String prog = "" + argv[0];
+        boolean wrap = this.rssTimed && ExternalBenchmark.hasGnuTime();
+        if (wrap) {
+            String[] timed #= ExternalBenchmark.underGnuTime(argv);
+            argv #= timed;
+        }
         ProcessResult r #= this.launch(#argv);
         this.lastStdout #= Sys.copyText(r.stdout());
-        this.lastStderr #= Sys.copyText(r.stderr());
+        String err #= Sys.copyText(r.stderr());
+        if (wrap) {
+            String v #= Sys.tokenAfter(err, "CAJETA_BENCH_MAXRSS=");
+            int64 kb = ExternalBenchmark.parseKb(v);
+            if (kb > this.timedPeakKb) {
+                this.timedPeakKb = kb;
+            }
+            String kept #= ExternalBenchmark.withoutTimeLines(err);
+            err #= kept;
+        }
+        this.lastStderr #= err;
         this.lastExitCode = r.exitCode();
         if (!r.launched()) {
             throw heap Exception("could not start " + prog);
@@ -190,18 +221,45 @@ public class ExternalBenchmark extends Benchmark {
         return c.run();
     }
 
-    // The child's peak RSS in KiB from one untimed run under GNU time, or -1.
-    // Leaves lastStdout / lastExitCode as the measured trials left them.
+    // The row's peak RSS: the largest the timed runs saw under
+    // rssFromTimedRuns, otherwise childPeakRssKb().
     public int64 measuredPeakRssKb() {
-        Path gt #= Path.of("/usr/bin/time");
-        if (!gt.exists()) {
+        if (this.rssTimed && this.timedPeakKb >= 0) {
+            return this.timedPeakKb;
+        }
+        return this.childPeakRssKb();
+    }
+
+    // The child's peak RSS in KiB from one untimed run under GNU time, or -1.
+    // Leaves lastStdout / lastExitCode as the measured trials left them. A
+    // ServiceBenchmark subclass whose row should report its phase command
+    // rather than the service calls this from its own measuredPeakRssKb.
+    public int64 childPeakRssKb() {
+        if (!ExternalBenchmark.hasGnuTime()) {
             return (int64) -1;
         }
         String[] inner #= this.argvFor(this.lastVariant);
-        int32 n = (int32) inner.count();
-        if (n == 0) {
+        if (inner.count() == 0) {
             return (int64) -1;
         }
+        String[] argv #= ExternalBenchmark.underGnuTime(inner);
+        ProcessResult r #= this.launch(#argv);
+        if (!r.launched()) {
+            return (int64) -1;
+        }
+        String err #= Sys.copyText(r.stderr());
+        String v #= Sys.tokenAfter(err, "CAJETA_BENCH_MAXRSS=");
+        return ExternalBenchmark.parseKb(v);
+    }
+
+    public static boolean hasGnuTime() {
+        Path gt #= Path.of("/usr/bin/time");
+        return gt.exists();
+    }
+
+    // `/usr/bin/time -f CAJETA_BENCH_MAXRSS=%M argv...`
+    public static #String[] underGnuTime(String[] inner) {
+        int32 n = (int32) inner.count();
         String[] argv = heap String[n + 3];
         argv[0] = "/usr/bin/time";
         argv[1] = "-f";
@@ -211,13 +269,21 @@ public class ExternalBenchmark extends Benchmark {
             argv[i + 3] = "" + inner[i];
             i = i + 1;
         }
-        ProcessResult r #= this.launch(#argv);
-        if (!r.launched()) {
-            return (int64) -1;
+        return argv;
+    }
+
+    // The child's stderr without what GNU time appended: its "Command exited
+    // with non-zero status N" line, when there is one, and the marker line.
+    public static #String withoutTimeLines(String err) {
+        int32 cut = (int32) err.indexOf("CAJETA_BENCH_MAXRSS=");
+        if (cut < 0) {
+            return "" + err;
         }
-        String err #= Sys.copyText(r.stderr());
-        String v #= Sys.tokenAfter(err, "CAJETA_BENCH_MAXRSS=");
-        return ExternalBenchmark.parseKb(v);
+        int32 status = (int32) err.indexOf("Command exited with non-zero status");
+        if (status >= 0 && status < cut) {
+            cut = status;
+        }
+        return err.substring(0, cut);
     }
 
     public static int64 parseKb(String v) {
