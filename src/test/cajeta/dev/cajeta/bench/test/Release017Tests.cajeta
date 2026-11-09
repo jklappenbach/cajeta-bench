@@ -1,0 +1,126 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.Benchmark;
+import dev.cajeta.bench.BenchMain;
+
+/**
+ * 0.1.7: --backend selects the variants that run on one backend. A variant
+ * label says what is measured (a dataset, a size, `device`) and the backend
+ * says where it runs, so `--variant cpu` cannot pick the cpu rows of a
+ * benchmark whose labels are dataset names. --backend reads backendFor(v).
+ */
+public class Release017Tests {
+
+    public Release017Tests() {
+        return;
+    }
+
+    // CountingBench and VariantsBench run on cpu; MixedBackendBench has
+    // host (cpu), cuda and vulkan (unsupported here) variants.
+    static #ArrayList<Benchmark> suite() {
+        ArrayList<Benchmark> list = heap ArrayList<Benchmark>();
+        list.add(heap CountingBench());
+        list.add(heap VariantsBench(true));
+        list.add(heap MixedBackendBench());
+        return list;
+    }
+
+    static #String[] runArgs(String backend, String out) {
+        String[] a = heap String[5];
+        a[0] = "--run";
+        a[1] = "--backend";
+        a[2] = "" + backend;
+        a[3] = "--out";
+        a[4] = "" + out;
+        return a;
+    }
+
+    @Test
+    public void backendSelectsOnlyTheVariantsThatRunThere() {
+        ArrayList<Benchmark> list #= Release017Tests.suite();
+        String out #= TestFiles.scratch("r017-cuda.csv");
+        String[] args #= Release017Tests.runArgs("cuda", out);
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(0);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(2);
+        Assert.that(text).contains(",cuda,");
+        Assert.isFalse(text.contains(",host,"));
+        Assert.isFalse(text.contains("counting"));
+        return;
+    }
+
+    @Test
+    public void backendCpuKeepsTheCpuVariantsWhateverTheirLabels() {
+        ArrayList<Benchmark> list #= Release017Tests.suite();
+        String out #= TestFiles.scratch("r017-cpu.csv");
+        String[] args = heap String[7];
+        args[0] = "--run";
+        args[1] = "--bench";
+        args[2] = "mixed";
+        args[3] = "--backend";
+        args[4] = "cpu";
+        args[5] = "--out";
+        args[6] = "" + out;
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(0);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(2);
+        Assert.that(text).contains(",host,");
+        Assert.isFalse(text.contains(",cuda,"));
+        return;
+    }
+
+    @Test
+    public void aBackendNothingRunsOnMatchesNothing() {
+        ArrayList<Benchmark> list #= Release017Tests.suite();
+        String out #= TestFiles.scratch("r017-hip.csv");
+        String[] args #= Release017Tests.runArgs("hip", out);
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(1);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(1);
+        return;
+    }
+
+    @Test
+    public void backendAndVariantTogetherTakeTheIntersection() {
+        ArrayList<Benchmark> list #= Release017Tests.suite();
+        String out #= TestFiles.scratch("r017-both.csv");
+        String[] args = heap String[7];
+        args[0] = "--run";
+        args[1] = "--backend";
+        args[2] = "cpu";
+        args[3] = "--variant";
+        args[4] = "cuda";
+        args[5] = "--out";
+        args[6] = "" + out;
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(1);
+        String text #= TestFiles.read(out);
+        Assert.that((int64) TestFiles.lineCount(text)).isEqualTo(1);
+        return;
+    }
+
+    @Test
+    public void listingFiltersByBackend() {
+        ArrayList<Benchmark> list #= Release017Tests.suite();
+        String plain #= BenchMain.listing(list, null, null, null, "cuda", false);
+        Assert.that(plain).contains("xpu/mixed/mixed");
+        Assert.isFalse(plain.contains("counting"));
+        Assert.isFalse(plain.contains("test/variants/variants"));
+        String full #= BenchMain.listing(list, null, null, null, "cpu", true);
+        Assert.that(full).contains("host [cpu]");
+        Assert.isFalse(full.contains("cuda [cuda]"));
+        Assert.that(full).contains("medium [cpu]");
+        return;
+    }
+
+    @Test
+    public void backendWithoutAValueIsAUsageError() {
+        ArrayList<Benchmark> list #= Release017Tests.suite();
+        String[] args = heap String[2];
+        args[0] = "--run";
+        args[1] = "--backend";
+        Assert.that((int64) BenchMain.run(args, list)).isEqualTo(2);
+        return;
+    }
+}

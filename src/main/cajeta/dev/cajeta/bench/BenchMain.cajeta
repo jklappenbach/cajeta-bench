@@ -25,6 +25,8 @@ import dev.cajeta.bench.report.Result;
 //                      prefix of it (`collection` selects collection/*)
 //   --bench <name>     select one benchmark by name()
 //   --variant <label>  select one variant label of the selected benchmarks
+//   --backend <name>   select the variants that run on one backend (cpu, cuda,
+//                      hip, vulkan), whatever their labels: backendFor(v)
 //   --verbose          with --list: every variant, its backend, skip reasons
 //   --out <path>       results CSV (default results.csv); env.csv is written
 //                      beside it (`<dir>/results.csv` → `<dir>/env.csv`).
@@ -46,6 +48,7 @@ public final class BenchMain {
         String areaFilter = null;
         String benchFilter = null;
         String variantFilter = null;
+        String backendFilter = null;
         boolean verbose = false;
         int32 i = 0;
         int32 argc = (int32) args.count();
@@ -61,7 +64,7 @@ public final class BenchMain {
                 BenchMain.usage();
                 return 0;
             } else if (a.equals("--out") || a.equals("--area") || a.equals("--bench")
-                       || a.equals("--variant")) {
+                       || a.equals("--variant") || a.equals("--backend")) {
                 if (i + 1 >= argc) {
                     System.stdout.println("bench: " + a + " needs a value");
                     BenchMain.usage();
@@ -74,6 +77,8 @@ public final class BenchMain {
                     areaFilter = v;
                 } else if (a.equals("--variant")) {
                     variantFilter = v;
+                } else if (a.equals("--backend")) {
+                    backendFilter = v;
                 } else {
                     benchFilter = v;
                 }
@@ -87,17 +92,17 @@ public final class BenchMain {
         }
 
         if (listMode) {
-            return BenchMain.list(benchmarks, areaFilter, benchFilter, variantFilter, verbose);
+            return BenchMain.list(benchmarks, areaFilter, benchFilter, variantFilter, backendFilter, verbose);
         }
         if (runMode) {
-            return BenchMain.runMeasured(benchmarks, outPath, areaFilter, benchFilter, variantFilter);
+            return BenchMain.runMeasured(benchmarks, outPath, areaFilter, benchFilter, variantFilter, backendFilter);
         }
         BenchMain.usage();
         return 2;
     }
 
     public static void usage() {
-        System.stdout.println("usage: <bench> --list [--verbose] | --run [--area <path>] [--bench <name>] [--variant <label>] [--out <results.csv>]");
+        System.stdout.println("usage: <bench> --list [--verbose] | --run [--area <path>] [--bench <name>] [--variant <label>] [--backend <cpu|cuda|hip|vulkan>] [--out <results.csv>]");
         System.stdout.println("  env: CAJETA_BENCH_SMOKE=1 (warmup 1, trials 3, rows tagged smoke),");
         System.stdout.println("       CAJETA_BENCH_MACHINE, CAJETA_BENCH_RUN_ID, CAJETA_BENCH_CAJETA_VERSION,");
         System.stdout.println("       CAJETA_BENCH_FLAGS");
@@ -125,8 +130,8 @@ public final class BenchMain {
     }
 
     public static int32 list(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter,
-                             String variantFilter, boolean verbose) {
-        String text #= BenchMain.listing(benchmarks, areaFilter, benchFilter, variantFilter, verbose);
+                             String variantFilter, String backendFilter, boolean verbose) {
+        String text #= BenchMain.listing(benchmarks, areaFilter, benchFilter, variantFilter, backendFilter, verbose);
         int32 n = text.byteLength();
         if (n > 0) {
             // println adds the final newline back.
@@ -136,7 +141,8 @@ public final class BenchMain {
     }
 
     public static int32 runMeasured(ArrayList<Benchmark> benchmarks, String outPath,
-                                    String areaFilter, String benchFilter, String variantFilter) {
+                                    String areaFilter, String benchFilter, String variantFilter,
+                                    String backendFilter) {
         String why #= BenchMain.prepareOut(outPath);
         if (!why.isEmpty()) {
             System.stdout.println(why);
@@ -145,6 +151,9 @@ public final class BenchMain {
         BenchConfig cfg #= BenchConfig.fromEnv();
         if (variantFilter != null) {
             cfg.variantFilter = "" + variantFilter;
+        }
+        if (backendFilter != null) {
+            cfg.backendFilter = "" + backendFilter;
         }
         if (cfg.smoke) {
             System.stdout.println("bench: SMOKE run (warmup 1, trials 3); rows are tagged smoke and never published");
@@ -244,14 +253,21 @@ public final class BenchMain {
     // variant, are shown. Calls variants() without setup().
     public static #String listing(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter,
                                   String variantFilter, boolean verbose) {
+        return BenchMain.listing(benchmarks, areaFilter, benchFilter, variantFilter, null, verbose);
+    }
+
+    // As above, also keeping only the variants whose backendFor(v) is
+    // `backendFilter` (null = every backend).
+    public static #String listing(ArrayList<Benchmark> benchmarks, String areaFilter, String benchFilter,
+                                  String variantFilter, String backendFilter, boolean verbose) {
         StringBuilder sb = heap StringBuilder();
         int32 n = benchmarks.count();
         int32 k = 0;
         while (k < n) {
             Benchmark b = benchmarks.get(k);
             boolean keep = BenchMain.selected(b, areaFilter, benchFilter);
-            if (keep && variantFilter != null) {
-                keep = Harness.hasVariant(b, variantFilter);
+            if (keep && (variantFilter != null || backendFilter != null)) {
+                keep = Harness.picksAny(b, variantFilter, backendFilter);
             }
             if (keep) {
                 if (!verbose) {
@@ -263,7 +279,7 @@ public final class BenchMain {
                     int32 vn = vs.count();
                     while (vi < vn) {
                         String v = vs.get(vi);
-                        if (variantFilter == null || v.equals(variantFilter)) {
+                        if (Harness.picks(b, v, variantFilter, backendFilter)) {
                             String label = "" + v;
                             if (label.isEmpty()) {
                                 label = "(no variant)";

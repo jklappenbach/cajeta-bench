@@ -32,6 +32,9 @@ public class BenchConfig {
     public BenchClock clock;
     // Measure only this variant label ("" = every variant). BenchMain --variant.
     public String variantFilter;
+    // Measure only variants whose backendFor(v) is this ("" = every backend).
+    // BenchMain --backend.
+    public String backendFilter;
     // CAJETA_BENCH_NO_GPU=1: no driver probe runs, `driver` stays empty, and
     // non-cpu rows' notes say `driver: not probed`.
     public boolean noGpu;
@@ -58,6 +61,7 @@ public class BenchConfig {
         this.os = "";
         this.clock = heap BenchClock();
         this.variantFilter = "";
+        this.backendFilter = "";
         this.noGpu = false;
         this.probes = 0;
         this.envKeys = heap ArrayList<String>();

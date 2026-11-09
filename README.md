@@ -12,7 +12,7 @@ library the way `dev.cajeta.unit` is the test library
 // your bench project's cajeta.json
 "settings": {
     "capabilities": ["filesystem", "clock", "env", "process"],
-    "dependencies": { "dev.cajeta.bench": "0.1.6" },
+    "dependencies": { "dev.cajeta.bench": "0.1.7" },
     "build": { "entry-method": "my.bench.Main::main" }
 },
 "tasks": {
@@ -61,6 +61,7 @@ public class HashMapIntBench extends Benchmark {
 | `--area <path>` | select a catalog path, or a prefix of one (`collection` selects `collection/*`) |
 | `--bench <name>` | select one benchmark by `name()` |
 | `--variant <label>` | select one variant label of the selected benchmarks |
+| `--backend <name>` | select the variants that run on one backend (`cpu`, `cuda`, `hip`, `vulkan`), whatever their labels |
 | `--verbose` | with `--list`: every variant, the backend it runs on, and skip reasons |
 | `--out <path>` | results CSV (default `results.csv`); `<dir>/results.csv` puts env at `<dir>/env.csv`. A missing directory is created; one that cannot be (a file in the way) is exit 2 before anything is measured, naming the path |
 
@@ -108,6 +109,12 @@ A benchmark can emit rows for several platforms (primavera, Spring Boot,
 FastAPI) by returning one variant per platform and answering the `*For`
 hooks. Variant keys must be unique within one benchmark, not across
 benchmarks; `--variant` selects by key.
+
+A variant's label says what is measured and `backendFor(variant)` says where
+it runs, so the two filters answer different questions. `--backend cuda` runs
+every variant that lands on the GPU, whether it is labelled `device`, `n4096`
+or a dataset name, and `--backend cpu` runs the rest. Given together, a variant
+must pass both.
 
 **Figures measured inside the work.** A trial may call
 `reportedNanos(ns)` (exec to first 200, a build without its clean): it

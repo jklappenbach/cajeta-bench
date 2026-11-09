@@ -43,10 +43,10 @@ public class Harness {
     // prepare(variant) builds each variant's input; teardown() runs once at
     // the end.
     public static void measureInto(Benchmark b, BenchConfig cfg, ArrayList<Result> rows) {
-        // --variant: a benchmark without that label contributes nothing, and
-        // is not set up.
-        if (!cfg.variantFilter.isEmpty()) {
-            if (!Harness.hasVariant(b, cfg.variantFilter)) {
+        // --variant / --backend: a benchmark with no variant passing both
+        // contributes nothing, and is not set up.
+        if (!cfg.variantFilter.isEmpty() || !cfg.backendFilter.isEmpty()) {
+            if (!Harness.picksAny(b, cfg.variantFilter, cfg.backendFilter)) {
                 return;
             }
         }
@@ -75,7 +75,7 @@ public class Harness {
         int32 vn = vs.count();
         while (vi < vn) {
             String v = vs.get(vi);
-            if (!cfg.variantFilter.isEmpty() && !v.equals(cfg.variantFilter)) {
+            if (!Harness.picks(b, v, cfg.variantFilter, cfg.backendFilter)) {
                 // not selected
             } else if (b.supportsVariant(v)) {
                 try {
@@ -159,6 +159,35 @@ public class Harness {
         }
         String be = b.backendFor(variant);
         return !be.equals("cpu");
+    }
+
+    // Whether variant `v` passes --variant (its label) and --backend (where
+    // it runs, backendFor(v)). A null or empty filter admits everything.
+    public static boolean picks(Benchmark b, String v, String variantFilter, String backendFilter) {
+        if (variantFilter != null && !variantFilter.isEmpty() && !v.equals(variantFilter)) {
+            return false;
+        }
+        if (backendFilter != null && !backendFilter.isEmpty()) {
+            String be = b.backendFor(v);
+            if (!be.equals(backendFilter)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Whether any variant of `b` passes both filters.
+    public static boolean picksAny(Benchmark b, String variantFilter, String backendFilter) {
+        ArrayList<String> vs #= b.variants();
+        int32 i = 0;
+        int32 n = vs.count();
+        while (i < n) {
+            if (Harness.picks(b, vs.get(i), variantFilter, backendFilter)) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
     }
 
     public static boolean hasVariant(Benchmark b, String label) {
