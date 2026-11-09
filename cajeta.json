@@ -15,7 +15,7 @@
 
     "details": {
         "name":               "dev.cajeta.bench",
-        "version":            "0.1.7",
+        "version":            "0.1.8",
         "description":        "cajeta-bench — benchmark harness: Benchmark contract, schema-v2 CSV rows, and the bench CLI",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],

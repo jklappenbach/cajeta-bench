@@ -151,8 +151,10 @@ that must keep its services where a firewall rule or another tool expects them;
 it throws when the range has fewer than `n` free.
 
 `throughput` is filled when `inputSize()` is not -1: `inputSize / median
-seconds`, three decimals, labelled `unit()`. So give `inputSize()` in the
-unit's numerator (items for `items/s`, MB for `MB/s`). `timestamp_unix` is the
+seconds`, scaled by the unit's prefix, three decimals, labelled `unit()`. Give
+`inputSize()` raw (bytes, ops, items); a K, M, G or T prefix divides by 1024^n
+on a byte unit (`MB/s` is 2^20 bytes a second, as the competitor drivers
+write) and by 1000^n otherwise (`Mop/s`, `GFLOP/s`); `items/s` is unscaled. `timestamp_unix` is the
 wall-clock second each row was made.
 
 `os` and `driver` are detected, not declared: `os` is `Ubuntu 26.04`,

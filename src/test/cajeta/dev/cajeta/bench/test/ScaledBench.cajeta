@@ -1,0 +1,29 @@
+package dev.cajeta.bench.test;
+
+import dev.cajeta.bench.Benchmark;
+
+/** 0.1.8: a raw inputSize under a prefixed unit; the scripted clock pins the median. */
+public class ScaledBench extends Benchmark {
+    public String unitName;
+    public int64 size;
+
+    public ScaledBench(String unitName, int64 size) {
+        this.unitName = "" + unitName;
+        this.size = size;
+    }
+
+    public String name() { return "scaled"; }
+    public String area() { return "test/scaled"; }
+    public int32 warmupIters() { return 1; }
+    public int32 measuredIters() { return 2; }
+    public int64 inputSize() { return this.size; }
+    public String unit() { return this.unitName; }
+
+    public void run(int32 iterations) {
+        return;
+    }
+
+    public boolean checkResult() {
+        return true;
+    }
+}

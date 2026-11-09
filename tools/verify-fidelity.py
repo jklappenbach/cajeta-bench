@@ -166,6 +166,26 @@ def main(argv):
         else:
             skip(name, "not in this file")
 
+    # 0. Throughput — every ok row of one benchmark and variant that carries a
+    #    throughput names the same unit (0.1.8): a rate compares across sides
+    #    only under one unit, and a row with a rate and no unit cannot be read.
+    def unit_check():
+        groups = {}
+        for r in rows:
+            if r["status"] != "ok" or not (r.get("throughput") or "").strip():
+                continue
+            key = (r["area"], r["benchmark"], r.get("variant") or "")
+            groups.setdefault(key, set()).add((r.get("throughput_unit") or "").strip())
+        bad = sorted(k for k, units in groups.items() if len(units) > 1 or "" in units)
+        check("throughput: every rated row of a benchmark names one unit", not bad,
+              "" if not bad else f"{len(bad)} offenders, e.g. "
+              + ", ".join(f"{a}/{b}" + (f"[{v}]" if v else "") + "=" + "|".join(sorted(groups[(a, b, v)]))
+                          for a, b, v in bad[:4]))
+    if any((r.get("throughput") or "").strip() for r in rows):
+        unit_check()
+    else:
+        skip("throughput: every rated row of a benchmark names one unit", "no rated rows")
+
     # 1. Memory tab — no measured Cajeta row emits the -1 alloc_bytes sentinel.
     #    Except an ExternalBenchmark row (notes tag `external`, dev.cajeta.bench
     #    0.1.1): its work runs in a child process, its memory is the child's

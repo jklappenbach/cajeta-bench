@@ -65,9 +65,10 @@ public class Benchmark {
         return (int64) 0;
     }
 
-    // Input size for the current variant, in the numerator unit of unit():
-    // the harness writes throughput = inputSize / median seconds, labelled
-    // unit() (so unit() "MB/s" wants inputSize in MB, "items/s" in items).
+    // Input size for the current variant, raw: bytes for a byte unit, ops for
+    // an op unit, items for items/s. The harness writes throughput =
+    // inputSize / median seconds scaled by unit()'s prefix (Harness.unitScale:
+    // "MB/s" divides by 2^20, "Mop/s" by 10^6), labelled unit().
     // -1 = not applicable, and the throughput column stays empty.
     public int64 inputSize() {
         return (int64) -1;

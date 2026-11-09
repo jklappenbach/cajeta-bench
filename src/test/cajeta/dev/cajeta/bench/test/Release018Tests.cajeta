@@ -1,0 +1,85 @@
+package dev.cajeta.bench.test;
+
+import cajeta.collection.ArrayList;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.bench.BenchConfig;
+import dev.cajeta.bench.Harness;
+import dev.cajeta.bench.report.Result;
+
+/** 0.1.8: throughput scales a raw inputSize by the unit's prefix. */
+public class Release018Tests {
+
+    public Release018Tests() {
+        return;
+    }
+
+    // Warmup (0,10), trials (100,130) and (200,220): the median is 30 ns.
+    static #BenchConfig scripted() {
+        int64[] s = heap int64[6];
+        s[0] = 0;   s[1] = 10;
+        s[2] = 100; s[3] = 130;
+        s[4] = 200; s[5] = 220;
+        FakeClock fc = heap FakeClock(#s);
+        BenchConfig cfg = heap BenchConfig();
+        cfg.useClock(#fc);
+        return cfg;
+    }
+
+    @Test
+    public void bytePrefixesAreBinaryAndCountPrefixesDecimal() {
+        Assert.that((int64) Harness.unitScale("MB/s")).isEqualTo((int64) 1048576);
+        Assert.that((int64) Harness.unitScale("KB/s")).isEqualTo((int64) 1024);
+        Assert.that((int64) Harness.unitScale("GB/s")).isEqualTo((int64) 1073741824);
+        Assert.that((int64) Harness.unitScale("Mop/s")).isEqualTo((int64) 1000000);
+        Assert.that((int64) Harness.unitScale("Mmsg/s")).isEqualTo((int64) 1000000);
+        Assert.that((int64) Harness.unitScale("GFLOP/s")).isEqualTo((int64) 1000000000);
+        Assert.that((int64) Harness.unitScale("TFLOP/s")).isEqualTo((int64) 1000000000000);
+        return;
+    }
+
+    @Test
+    public void unprefixedUnitsAreUnscaled() {
+        Assert.that((int64) Harness.unitScale("")).isEqualTo((int64) 1);
+        Assert.that((int64) Harness.unitScale("B/s")).isEqualTo((int64) 1);
+        Assert.that((int64) Harness.unitScale("items/s")).isEqualTo((int64) 1);
+        Assert.that((int64) Harness.unitScale("tokens/s")).isEqualTo((int64) 1);
+        Assert.that((int64) Harness.unitScale("req/s")).isEqualTo((int64) 1);
+        Assert.that((int64) Harness.unitScale("messages/s")).isEqualTo((int64) 1);
+        Assert.that((int64) Harness.unitScale("MB")).isEqualTo((int64) 1);
+        return;
+    }
+
+    @Test
+    public void rawBytesUnderMegabytesPerSecondDivideByTwoToTheTwenty() {
+        BenchConfig cfg #= Release018Tests.scripted();
+        ScaledBench b = heap ScaledBench("MB/s", (int64) 3145728);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Result r = rows.get(0);
+        Assert.that(r.medianNs).isEqualTo(30);
+        Assert.that(r.throughputUnit).isEqualTo("MB/s");
+        // 3 MiB in 30 ns: 1e8 MB/s.
+        Assert.that(r.throughput).isEqualTo("100000000.000");
+        return;
+    }
+
+    @Test
+    public void rawOpsUnderMegaopsPerSecondDivideByAMillion() {
+        BenchConfig cfg #= Release018Tests.scripted();
+        ScaledBench b = heap ScaledBench("Mop/s", (int64) 3000000);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(0).throughput).isEqualTo("100000000.000");
+        return;
+    }
+
+    @Test
+    public void itemsPerSecondStaysRaw() {
+        BenchConfig cfg #= Release018Tests.scripted();
+        ScaledBench b = heap ScaledBench("items/s", (int64) 3);
+        ArrayList<Result> rows = heap ArrayList<Result>();
+        Harness.measureInto(b, cfg, rows);
+        Assert.that(rows.get(0).throughput).isEqualTo("100000000.000");
+        return;
+    }
+}

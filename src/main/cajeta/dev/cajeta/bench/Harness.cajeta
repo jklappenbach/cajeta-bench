@@ -204,14 +204,49 @@ public class Harness {
         return false;
     }
 
-    // throughput = inputSize / median seconds, three decimals, when the
-    // benchmark declares an input size and the median is positive.
+    // throughput = inputSize / median seconds / unitScale(unit), three
+    // decimals, when the benchmark declares an input size and the median is
+    // positive. inputSize is raw (bytes, ops, items); the unit's prefix scales.
     public static void fillThroughput(Result r) {
         if (r.inputSize < 0 || r.medianNs <= 0) {
             return;
         }
         float64 perSec = ((float64) r.inputSize) * 1000000000.0 / ((float64) r.medianNs);
-        r.throughput #= Harness.fixed3(perSec);
+        r.throughput #= Harness.fixed3(perSec / Harness.unitScale(r.throughputUnit));
+    }
+
+    // The count one of `unit` stands for: a K, M, G or T prefix is 1024^n on a
+    // byte unit (`MB/s` is 2^20 bytes a second, what the competitor drivers
+    // write) and 1000^n on anything else (`Mop/s`, `GFLOP/s`, `Mmsg/s`); a unit
+    // with no prefix (`items/s`, `B/s`, `tokens/s`, "") is 1.
+    public static float64 unitScale(String unit) {
+        if (unit.count() < (int64) 3) {
+            return 1.0;
+        }
+        int32 c = (int32) unit.charAt(0);
+        int32 n = 0;
+        if (c == 75) { n = 1; }         // K
+        if (c == 77) { n = 2; }         // M
+        if (c == 71) { n = 3; }         // G
+        if (c == 84) { n = 4; }         // T
+        if (n == 0) {
+            return 1.0;
+        }
+        int32 d = (int32) unit.charAt(1);
+        boolean bytes = d == 66 && (int32) unit.charAt(2) == 47;   // "?B/"
+        boolean word = d == 70 || (d >= 97 && d <= 122);           // F (FLOP) or a lowercase word
+        if (!bytes && !word) {
+            return 1.0;
+        }
+        float64 base = 1000.0;
+        if (bytes) { base = 1024.0; }
+        float64 scale = 1.0;
+        int32 i = 0;
+        while (i < n) {
+            scale = scale * base;
+            i = i + 1;
+        }
+        return scale;
     }
 
     // The row's throughput from what the trials reported, when any did:
